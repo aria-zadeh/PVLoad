@@ -87,6 +87,7 @@ and the readings describe the same instant.
 docs/
   HARDWARE.md      Topology, pin map, SPI protocol, BOM
   DECISIONS.md     Design rationale and open questions
+  BRINGUP.md       What has been measured on the assembled board
   img/             Schematic and PCB renders
 hardware/
   altium/          Altium project, footprint and symbol libraries, STEP model
@@ -149,6 +150,8 @@ independently.
 |---|---|---|
 | `"plan"` | nothing | Validate configuration, print time estimate |
 | `"board"` | Arduino | Safe state, potentiometer self-test, walk a spread of load states |
+| `"ramp"` | Arduino | Climb the resistance range slowly enough to follow on a handheld meter |
+| `"wiper"` | Arduino | Park at the state pairs whose difference is one wiper resistance |
 | `"edfa"` | amplifier | Identify, report temperature and status, ramp through configured levels |
 | `"meters"` | electrometers | Identify, configure, take ten readings |
 | `"sweep"` | all | Full experiment, written to CSV |
@@ -183,6 +186,8 @@ hardware.
 | `LEVEL_MODE`, `LEVEL_SPACING`, `LEVEL_VALUES` | Illumination level selection |
 | `EDFA_CURRENT_LIMIT` | Pump current ceiling; device maximum is 1000 mA |
 | `EDFA_WARMUP` | Hold at first level, in seconds |
+| `RAMP_STEPS`, `RAMP_DWELL` | States visited by `"ramp"` and how long each state is held |
+| `WIPER_CODES` | Codes `"wiper"` compares at |
 | `SETTLE_TIME` | Per-state hold when no meters are attached |
 | `WRITE_CSV`, `OUT_DIR`, `RUN_TAG` | Output |
 
@@ -191,6 +196,32 @@ conversion takes 365 ms or 780 ms depending on function and range, which fixes t
 meters are triggered before either reply is read, so a point costs one conversion rather than two
 and a 769-state level takes about six minutes. `RUN = "plan"` prints the estimate for a given
 configuration.
+
+### Checking the load with a handheld meter
+
+`RUN = "ramp"` needs no cell, no amplifier, and no bench meters. Bring up 24 V, then the Arduino,
+clip a handheld meter across J1 and J3 in ohms, and run it. The board climbs from the `SHORT` relay
+contact to the 470 kΩ `OPEN` path in `RAMP_STEPS` stages, holding each for `RAMP_DWELL` seconds so
+an autoranging meter has time to settle.
+
+The printed ohms come from the resistance model, not from the board. `R_WIPER` is a worst-case
+bound rather than a measurement and `R_AB` is ±20%, so expect the meter to disagree.
+
+`RUN = "wiper"` turns that disagreement into a number. Probe, jack and trace resistance is common
+to every reading a handheld takes, so it is removed by subtracting two readings rather than by
+trusting either one. Writing `s` for the ladder step, and noting that a `FULL` state at code sum
+`n` puts `U1` at `n` and `U2` at zero:
+
+```
+SHORT   = K2
+LOW(n)  = K1 + Rw1 + n·s + K3
+FULL(n) = K1 + Rw1 + n·s + Rw2
+```
+
+`LOW(0) − SHORT` is `Rw1` and `FULL(n) − LOW(n)` is `Rw2`, each to within a 0.150 Ω reed contact.
+Neither difference contains the leads, the jacks or K1. `Rw2` is a switch rather than a resistor,
+so the same value should come back at every code in `WIPER_CODES`; one that tracks the code is
+`R_AB` being wrong instead.
 
 `R_WIPER` and `CELL_SETTLE` in Part 2 are placeholders rather than measurements. `R_WIPER` affects
 sweep ordering and printed estimates only. `CELL_SETTLE` is the settle-model term that matters most

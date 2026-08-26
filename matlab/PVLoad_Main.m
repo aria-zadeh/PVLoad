@@ -10,11 +10,15 @@ clc;
 
 %   "plan"    print the plan and the time estimate, open nothing
 %   "board"   Arduino and PCB only
+%   "ramp"    board only, climbing the resistance range slowly enough to
+%             follow on a handheld meter across J1 and J3
+%   "wiper"   board only, the pairs of states whose difference is one
+%             wiper resistance and nothing else
 %   "edfa"    amplifier only
 %   "meters"  electrometers only
 %   "sweep"   the full experiment, written to CSV
 
-RUN = "plan";
+RUN = "wiper";  
 
 
 % to find com ports: serialportlist("available")
@@ -88,6 +92,20 @@ SETTLE_TIME  = 0.20;       % s per state with no meters. ignored once
 PRINT_STATUS = true;       % echo each state. off for long unattended runs.
 SELF_TEST    = true;       % probe both pots over SPI first. false to test
                            % the flow on a bare Arduino with no board.
+
+RAMP_STEPS = 80;           % states RUN "ramp" visits, spread evenly across
+                           % the sweep. 2 to 769.
+RAMP_DWELL = 4.0;          % s each state is held, in "ramp" and "wiper"
+                           % both. an autoranging handheld needs a second
+                           % or two to re-range and you need longer than
+                           % that to write the number down.
+
+WIPER_CODES = [0 255];
+                           % code sums RUN "wiper" compares at. a wiper
+                           % resistance that changes across them is not a
+                           % wiper resistance. past 255 there is no LOW
+                           % state to pair with, so those codes contribute
+                           % a FULL row alone and walk U2 by itself.
 
 WRITE_CSV = true;
 OUT_DIR   = "../data/sweep_data";
@@ -237,6 +255,9 @@ cfg = struct( ...
     'IncludeOpen',   INCLUDE_OPEN, ...
     'VerifyWiper',   VERIFY_WIPER, ...
     'SelfTest',      SELF_TEST, ...
+    'RampSteps',     RAMP_STEPS, ...
+    'RampDwell',     RAMP_DWELL, ...
+    'WiperCodes',    WIPER_CODES, ...
     'RabNominal',    R_AB_NOMINAL, ...
     'WiperSteps',    WIPER_STEPS, ...
     'RWiper',        R_WIPER, ...
@@ -307,6 +328,8 @@ assertConfig(cfg);
 switch cfg.Run
     case "plan",   runPlanOnly(cfg);
     case "board",  runBoardCheck(cfg);
+    case "ramp",   runRamp(cfg);
+    case "wiper",  runWiperCheck(cfg);
     case "edfa",   runEdfaCheck(cfg);
     case "meters", runMeterCheck(cfg);
     case "sweep",  results = runSweepAll(cfg);
@@ -356,6 +379,175 @@ function runBoardCheck(cfg)
     enterSafeState(board);
     clear guard;
     fprintf("\nBoard OK. Returned to OPEN.\n");
+end
+
+function runRamp(cfg)
+% Board only, for watching the load change on a handheld meter clipped
+% across J1 and J3 with no cell in the loop. Same states runBoardCheck
+% walks, held long enough to read.
+%
+% The plan is already sorted by resistance, so stepping through it evenly
+% climbs from the SHORT contact to the 470 kohm OPEN path without going
+% back on itself. Relays click on the way, which is part of what is being
+% checked.
+%
+% The printed ohms are the resistance model, not a measurement. R_WIPER is
+% the datasheet worst case of 200 ohm and R_AB is +/-20%, so a meter that
+% disagrees at the low end is the model being pessimistic rather than the
+% board being wrong. That reading is worth keeping: it is what R_WIPER
+% should be set to.
+
+    plan  = buildSweepPlan(cfg);
+    board = connectBoard(cfg);
+    guard = onCleanup(@() quietly(@() enterSafeState(board)));
+
+    fprintf("Board connected on %s.\n", cfg.SerialPort);
+    enterSafeState(board);
+    fprintf("Safe state (OPEN) entered.\n");
+
+    if cfg.SelfTest
+        selfTestPotentiometers(board);
+    end
+
+    steps = unique(round(linspace(1, numel(plan), cfg.RampSteps)));
+    jumps = [NaN, diff([plan(steps).Resistance])];
+
+    fprintf("\n%d states, %g s each, about %.0f s in total.\n", ...
+        numel(steps), cfg.RampDwell, numel(steps) * cfg.RampDwell);
+    fprintf("Meter goes on J1 and J3, set to ohms, with no cell connected.\n");
+    fprintf("Compare the step column, not the total: a series offset lands " + ...
+            "in\nevery reading and cancels out of a difference.\n\n");
+
+    for n = 1:numel(steps)
+        k = steps(n);
+        if isnan(jumps(n))
+            gap = "";
+        else
+            gap = sprintf("   step +%8.1f", jumps(n));
+        end
+        % Printed before the state is applied, and flushed, so the console
+        % says what is coming rather than what has already been and gone.
+        fprintf("  [%4d/%4d] %-5s  U1=%3d  U2=%3d  ~%9.1f ohm%s\n", ...
+            k, numel(plan), plan(k).Mode, plan(k).Code1, plan(k).Code2, ...
+            plan(k).Resistance, gap);
+        drawnow;
+        applyState(board, plan(k), cfg.RampDwell);
+    end
+
+    enterSafeState(board);
+    clear guard;
+    fprintf("\nRamp done. Returned to OPEN.\n");
+end
+
+function runWiperCheck(cfg)
+% Board only. Wiper resistance measured by difference, which is the only
+% way to get it off a handheld: every reading shares the same probes,
+% jacks and traces, so subtracting two of them cancels all of that.
+%
+% Writing s for the ladder step and taking FULL at a code sum of n, which
+% splits as U1 = n and U2 = 0:
+%
+%   SHORT   = K2
+%   LOW(n)  = K1 + Rw1 + n*s + K3
+%   FULL(n) = K1 + Rw1 + n*s + Rw2
+%
+% so LOW(0) - SHORT is Rw1 and FULL(n) - LOW(n) is Rw2, both to within a
+% reed contact, which is 0.150 ohm. Neither difference contains the leads,
+% the jacks or K1, so a bad probe offset does not reach the answer.
+%
+% Repeating across codes is the check that matters. Rw2 is a switch, not a
+% resistor, so the same number should come back at every code. A
+% difference that tracks the code is R_AB being wrong instead.
+
+    plan  = buildSweepPlan(cfg);
+    board = connectBoard(cfg);
+    guard = onCleanup(@() quietly(@() enterSafeState(board)));
+
+    fprintf("Board connected on %s.\n", cfg.SerialPort);
+    enterSafeState(board);
+
+    if cfg.SelfTest
+        selfTestPotentiometers(board);
+    end
+
+    idx = findState(plan, "SHORT", 0, cfg);
+    for k = 1:numel(cfg.WiperCodes)
+        n = cfg.WiperCodes(k);
+        % LOW runs one pot, so it stops at 255. Past that a FULL row stands
+        % alone and every further step is U2 moving on its own, which is
+        % the only way to see U2 without a probe.
+        if n <= cfg.WiperSteps
+            idx(end + 1) = findState(plan, "LOW", n, cfg);   %#ok<AGROW>
+        end
+        idx(end + 1) = findState(plan, "FULL", n, cfg);      %#ok<AGROW>
+    end
+
+    fprintf("\n%d states, %g s each, about %.0f s in total.\n", ...
+        numel(idx), cfg.RampDwell, numel(idx) * cfg.RampDwell);
+    fprintf("Write down the meter at every hold.\n\n");
+
+    for k = 1:numel(idx)
+        state = plan(idx(k));
+        fprintf("  %2d  %-5s  U1=%3d  U2=%3d   model ~%9.1f ohm\n", ...
+            k, state.Mode, state.Code1, state.Code2, state.Resistance);
+        drawnow;
+        applyState(board, state, cfg.RampDwell);
+    end
+
+    checkK3(board, cfg);
+
+    enterSafeState(board);
+    clear guard;
+
+    fprintf("\nU1 wiper is row 2 minus row 1.\n");
+    fprintf("U2 wiper is each FULL row minus the LOW row above it, and " + ...
+            "should be\nthe same number every time.\n");
+    fprintf("Returned to OPEN.\n");
+end
+
+function checkK3(board, cfg)
+% LOW bypasses U2 through K3, so U2's code cannot reach the terminals. If
+% the meter moves when it changes, K3 is not closing and U2 has been in
+% the path all along. That failure is invisible to every other test here:
+% it makes LOW and FULL read alike, which reads as a wiper resistance of
+% zero rather than as a relay that never operated.
+%
+% The two codes are written straight to the pots rather than pulled from
+% the plan, because no planned state exercises U2 while K3 is closed.
+
+    fprintf("\nK3 check. LOW shorts out U2, so U2's code must not matter\n");
+    fprintf("and all four of these must read alike. A 5 kohm swing is K3\n");
+    fprintf("failing to close.\n\n");
+
+    setMode(board, "LOW");
+    for code = [0 255 0 255]
+        fprintf("  LOW    U1=  0  U2=%3d\n", code);
+        drawnow;
+        setWipers(board, 0, code);
+        pause(cfg.RampDwell);
+    end
+end
+
+function k = findState(plan, mode, code, cfg)
+% Pulled out of the plan rather than rebuilt, so this mode cannot drift
+% away from the resistance model the sweep uses.
+
+    switch mode
+        case "SHORT"
+            k = find([plan.Mode] == "SHORT", 1);
+        case "LOW"
+            k = find([plan.Mode] == "LOW" & [plan.Code1] == code, 1);
+        case "FULL"
+            k = find([plan.Mode] == "FULL" & ...
+                     ([plan.Code1] + [plan.Code2]) == code, 1);
+    end
+
+    if isempty(k)
+        error("PVLoad:StateNotInPlan", ...
+            "%s at code %d is not in the sweep. CODE_STEP is %g and " + ...
+            "INCLUDE_SHORT is %d; both have to leave that state in.", ...
+            mode, code, cfg.CodeStep, cfg.IncludeShort);
+    end
 end
 
 function runEdfaCheck(cfg)
@@ -518,7 +710,24 @@ end
 function assertConfig(cfg)
 % Catches a mistyped config block before anything is energised.
 
-    mustBeOneOf(cfg.Run, ["plan" "board" "edfa" "meters" "sweep"], "RUN");
+    mustBeOneOf(cfg.Run, ...
+        ["plan" "board" "ramp" "wiper" "edfa" "meters" "sweep"], "RUN");
+
+    if cfg.RampSteps < 2 || cfg.RampSteps > 769
+        error("PVLoad:BadRampSteps", ...
+            "RAMP_STEPS is %g. The sweep has 769 states and a ramp needs " + ...
+            "at least 2 of them.", cfg.RampSteps);
+    end
+    if cfg.RampDwell <= 0
+        error("PVLoad:BadRampDwell", "RAMP_DWELL must be positive.");
+    end
+    if isempty(cfg.WiperCodes) || any(cfg.WiperCodes < 0) || ...
+       any(cfg.WiperCodes > 2 * cfg.WiperSteps) || ...
+       any(mod(cfg.WiperCodes, 1) ~= 0)
+        error("PVLoad:BadWiperCodes", ...
+            "WIPER_CODES must be whole numbers from 0 to %d, which is the " + ...
+            "range of a FULL code sum.", 2 * cfg.WiperSteps);
+    end
 
     L = cfg.Levels;
     mustBeOneOf(L.Mode,    ["current" "power" "table"], "LEVEL_MODE");
