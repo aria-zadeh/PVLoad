@@ -66,11 +66,14 @@ The EDFA100P has no command that sets optical output power. Its keyword list is
 `id`, `target`, `temp`, `current`, `enable`, `specs`, `step`, `save` and
 `statword`; gain is adjusted by pump current only.
 
-A measured current-to-power table is therefore the only mapping between the
-quantity of interest and the quantity the device accepts. `LEVEL_MODE "power"`
-requires the table; `"current"` does not. The table must be strictly monotonic
-before inversion, since a non-monotonic column makes the inverse ambiguous and
-indicates a bad measurement.
+A measured current-to-power mapping is therefore the only bridge between the
+quantity of interest and the quantity the device accepts. It lives in Part 1 of
+`PVLoad_Main.m` as two index-matched arrays, `CAL_CURRENT_MA` and
+`CAL_POWER_MW`, rather than a separate file, so a run is fully described by the
+script that produced it. `LEVEL_MODE "power"` requires them; `"current"` does
+not. Both must be the same length and strictly increasing before inversion,
+since a non-monotonic array makes the inverse ambiguous and indicates a bad
+measurement.
 
 Requested powers outside the measured range are rejected rather than
 extrapolated. Interpolation is linear rather than spline: the current-power curve
