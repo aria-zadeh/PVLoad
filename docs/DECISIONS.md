@@ -114,9 +114,10 @@ the cleanup guard a function workspace.
 
 ## Isc from an intercept, not from the SHORT point
 
-An ammeter measures current across an internal shunt, 5 ohm on a 34401A's 10 mA
-and 100 mA ranges. That shunt is in series with the load, so at `SHORT` the cell
-sits near 80 mV rather than at the 0.150 ohm relay contact alone.
+An ammeter costs the loop some voltage. The 617 is a feedback ammeter and takes
+under 1 mV on every range but 20 mA, where it takes 3 mV, so at `SHORT` the cell
+sits near 5 mV rather than at the 0.150 ohm relay contact alone. A shunt ammeter
+would put it near 80 mV, and the argument below holds either way.
 
 This does not invalidate the Isc endpoint, because voltage is measured at every
 point rather than assumed. `SHORT` is the lowest-voltage point on the curve and
@@ -193,16 +194,24 @@ debug once two TSSOP packages are soldered down.
 - The `OPEN` point degrades as a Voc measurement at low illumination. The 470 kohm
   path draws a fixed 19 uA at 9 V: 0.12% of Isc at full power, ~5% around 2.4 mW.
   `reportPlan` warns above 5%.
-- The SCPI dialect is written for a 34401A and has not been run against one.
-  `RUN = "meters"` tests it cheaply. `SYST:ERR?` is checked after configuration so
-  a wrong keyword fails at setup rather than producing readings from a meter in
-  the wrong mode.
+- The 617 dialect is written from the manual and has not been run against the
+  instrument. `RUN = "meters"` tests it cheaply. The U1 error word is read after
+  configuration, so a letter the 617 does not know fails at setup rather than
+  producing readings from a meter in the wrong mode.
+- The 400 ms conversion time in `DMM_CONVERSION` is a round figure over the
+  365 ms and 780 ms the manual quotes. It sets the printed estimate and the read
+  timeout, nothing else. Time a level at bring-up and replace it.
+- Overlapped reads assume a one-shot 617 holds the talker off until the
+  conversion it was just triggered for is finished. If it instead returns the
+  previous reading, every point is lagged by one state and the curve is shifted
+  rather than wrong-looking. Check it at bring-up by stepping between two widely
+  separated load states; `DMM_PARALLEL = false` is the fallback.
 
 ## Procedure requirements
 
 Not open questions, but constraints on how the bench is wired:
 
 - The voltmeter connects on the cell side of the ammeter. Downstream of the
-  ammeter's internal shunt it reads low by the burden drop, ~80 mV at 16 mA
-  through 5 ohm, which is the entire signal at the Isc end.
+  ammeter it reads low by the burden drop, 3 mV at 16 mA on the 617's 20 mA
+  range and about 80 mV through the 5 ohm shunt of a general-purpose DMM.
 - 24 V comes up before 5 V, and 5 V comes down first.

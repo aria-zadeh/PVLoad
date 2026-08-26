@@ -16,8 +16,8 @@ The board is placed in a single series loop with a PV cell. Sweeping the load an
 voltage and current at each step traces the cell's I-V curve, from which the maximum power
 point, fill factor, and matched load resistance are computed.
 
-**The board contains no measurement circuitry.** Voltage and current are read by two external bench
-multimeters addressed over VISA. Software sets the load state, reads both meters at each point, and
+**The board contains no measurement circuitry.** Voltage and current are read by two external
+Keithley 617 electrometers addressed over VISA. Software sets the load state, reads both meters at each point, and
 writes the results to CSV.
 
 ### Design targets
@@ -242,8 +242,8 @@ meters.
 
 Current is measured by breaking the PV+ lead outside the board and putting the ammeter in series
 ahead of J1. Voltage is measured across the cell itself, on the cell side of the ammeter, **not**
-across J1 and J3: a voltmeter placed at the jacks sits downstream of the ammeter's internal shunt
-and reads low by the burden drop. See the note at the end of this section.
+across J1 and J3: a voltmeter placed at the jacks sits downstream of the ammeter and reads low by
+the burden drop. See the note at the end of this section.
 
 Two meters are needed to capture the same operating point. With one meter each point must be
 visited twice, which assumes illumination has not changed between readings.
@@ -295,25 +295,23 @@ matters here is that each logged row belongs to a stated pump current, so the lo
 Two notes on putting bench meters in this circuit. Neither is a board problem, and neither needs a
 board change.
 
-**Put the voltmeter on the cell side of the ammeter.** This is the one that matters. Any ammeter
-measures current by dropping it across an internal shunt; on an Agilent 34401A that shunt is 5 ohm
-on the 10 mA and 100 mA ranges and 0.1 ohm on the 1 A and 3 A ranges. With the ammeter ahead of J1,
-a voltmeter across J1 and J3 sits *downstream* of that shunt and therefore reads short of the
-cell's terminal voltage by the burden drop, about 80 mV at 16 mA. That is a small error at the Voc
-end and the entire signal at the Isc end. Clipping the voltmeter directly to the cell leads,
-upstream of the ammeter, removes it. It costs nothing.
+**Put the voltmeter on the cell side of the ammeter.** Any ammeter costs the loop some voltage. A
+general-purpose DMM drops it across an internal shunt and takes about 80 mV at 16 mA on a 5 ohm
+range; the 617 is a feedback ammeter and takes under 1 mV on every range but 20 mA, where it takes
+3 mV. With the ammeter ahead of J1, a voltmeter across J1 and J3 sits *downstream* of that drop and
+reads short of the cell's terminal voltage by it. Clipping the voltmeter directly to the cell
+leads, upstream of the ammeter, removes it. On a 617 the error is small either way, and it still
+costs nothing to get right.
 
-**The shunt shifts where `SHORT` lands, and that is all.** With 5 ohm inline the cell sits at about
-80 mV at the `SHORT` state rather than at the 0.150 ohm contact alone. That does not corrupt the
+**The burden shifts where `SHORT` lands, and that is all.** With 3 mV inline the cell sits near
+5 mV at the `SHORT` state rather than at the 0.150 ohm contact alone. That does not corrupt the
 measurement, because voltage is measured at every point rather than assumed: `SHORT` is simply the
 lowest-voltage point on the curve, not a point defined to be at zero. Isc is the V -> 0 intercept
 extrapolated from the lowest few points, which is how it should be extracted in any case.
 
-Prefer the 100 mA range over the 1 A range for a ~16 mA cell despite the larger shunt. Meter error
-carries a "percent of range" floor that is fixed in absolute size, so reading 16 mA on a 1 A range
-scales that floor to 1 A and swamps the reading; the 100 mA range keeps it an order of magnitude
-smaller. The operating-point offset the 5 ohm causes is systematic and correctable, and the meter
-error is not.
+The current range is not a choice. The 617 stops at 20 mA and the ranges below it are decades
+apart, so a ~16 mA cell fits one range and no other. A cell that outruns 20 mA needs an external
+shunt or a lower illumination; the software refuses it rather than reading a saturated range.
 
 ---
 

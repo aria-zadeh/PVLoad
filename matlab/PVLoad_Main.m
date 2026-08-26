@@ -11,7 +11,7 @@ clc;
 %   "plan"    print the plan and the time estimate, open nothing
 %   "board"   Arduino and PCB only
 %   "edfa"    amplifier only
-%   "meters"  multimeters only
+%   "meters"  electrometers only
 %   "sweep"   the full experiment, written to CSV
 
 RUN = "plan";
@@ -25,7 +25,7 @@ SERIAL_PORT = "COM4";                % Arduino com port
 EDFA_ENABLED  = false;               % set to true if laser enabled
 EDFA_PORT     = "COM5";              % amplifier port
 
-DMM_ENABLED   = false;               % set to true if multimeter enabled
+DMM_ENABLED   = false;               % set to true if electrometers enabled
 DMM_V_ADDRESS = "GPIB0::22::INSTR";  % meter across the cell
 DMM_I_ADDRESS = "GPIB0::23::INSTR";  % meter in series with PV+
 
@@ -33,7 +33,9 @@ DMM_I_ADDRESS = "GPIB0::23::INSTR";  % meter in series with PV+
 
 
 % roughly what your cell does at POWER_FULL. sizes the ammeter range and
-% prints estimates only, never enters a result, so rough is fine.
+% prints estimates only, never enters a result, so rough is fine. the one
+% place it is not advisory is the 20 mA ceiling: the 617 has no range above
+% it, so an ISC_FULL past that is refused rather than measured badly.
 
 ISC_FULL   = 0.016;        % A, short-circuit current at POWER_FULL
 VOC_FULL   = 9;            % V, open-circuit voltage at POWER_FULL
@@ -77,14 +79,9 @@ EDFA_WARMUP        = 900;       % s at the first level. 900 is the 15 min
                                 % 0 for a quick test.
 
 
-% DMM_NPLC is the biggest lever in the sweep. line cycles integrated per
-% reading: more is quieter and slower. 34401A takes 0.02, 0.2, 1, 10, 100.
-%   0.02   0.7 ms    ~10 s per level, noisy
-%   1      33 ms     ~40 s per level, good default
-%   10     333 ms    ~7 min per level, final runs
-%   100    3.3 s     ~70 min per level
-
-DMM_NPLC = 1;
+% the 617 converts on a fixed schedule, so there is no integration time to
+% trade against speed and nothing here to tune. a level costs about six
+% minutes; RUN "plan" prints the estimate for the levels configured.
 
 SETTLE_TIME  = 0.20;       % s per state with no meters. ignored once
                            % DMM_ENABLED, which computes the hold instead.
@@ -157,44 +154,52 @@ EDFA_TEMP_TOL     = 0.5;   % degC that temp? may differ from target?
 EDFA_VERIFY       = true;  % query every setting back after writing it
 
 
-% meters. defaults are an Agilent 34401A over VISA. a different meter is
-% an edit to SCPI below and nowhere else.
+% meters. two Keithley 617 electrometers on GPIB, one on volts and one on
+% amps. the 617 predates SCPI: a command is a letter and a number, several
+% of them travel in one string, and none of them do anything until an X
+% arrives. it has no serial port, so VISA over GPIB is the only way in.
+% section and table numbers below are the 617 manual, 617-901-01 Rev G.
 
-DMM_BACKEND    = "visa";           % visa | serial
-DMM_BAUD       = 9600;             % serial backend only
-DMM_TERMINATOR = "LF";             % serial backend only
-DMM_TIMEOUT    = 10;               % s, must exceed the longest aperture
-DMM_LINE_FREQ  = 60;               % Hz
-DMM_AUTOZERO   = true;             % doubles the aperture, kills offset drift
-DMM_V_RANGE    = 10;               % V, fits 9 V Voc and is the top range
-                                   % where high-Z is available
-DMM_I_RANGE    = 0;                % A, or 0 to pick per level from ISC_FULL
-DMM_I_RANGES   = [0.01 0.1 1 3];   % ranges the meter actually has
-DMM_HIGHZ      = true;             % INP:IMP:AUTO. off by default on a
-                                   % 34401A, and a 10 MOhm input across the
-                                   % 470 kohm OPEN path reads 4.5% low.
-DMM_PARALLEL   = true;             % trigger both meters, then collect both
-DMM_MAX_FAULTS = 5;                % consecutive read failures before abort
+DMM_TIMEOUT      = 10;             % s, must exceed one conversion
+DMM_CONVERSION   = 0.40;           % s from trigger to reading ready. table
+                                   % 3-15 gives 365 ms or 780 ms depending
+                                   % on function and range. there is no
+                                   % integration time to set.
+DMM_ZERO_CORRECT = true;           % null a range's own offset when it is set
+DMM_V_RANGE      = 20;             % V. Voc is 9 V and the range below is 2 V.
+DMM_V_RANGES     = [0.2 2 20 200]; % volts ranges R1 to R4. 250 V peak is
+                                   % the input limit whatever the range.
+DMM_I_RANGE      = 0;              % A, or 0 to pick per level from ISC_FULL
+DMM_I_RANGES     = [2e-12 2e-11 2e-10 2e-9 2e-8 2e-7 2e-6 2e-5 ...
+                    2e-4 2e-3 2e-2];
+                                   % amps ranges R1 to R11, table 3-12.
+DMM_PARALLEL     = true;           % trigger both meters, then collect both
+DMM_MAX_FAULTS   = 5;              % consecutive read failures before abort
 
-% INP:IMP:AUTO is 34401A spelling; the 3446xA family wants VOLT:DC:IMP:AUTO.
-SCPI = struct( ...
-    'Ident',    "*IDN?", ...
-    'Reset',    "*RST", ...
-    'Clear',    "*CLS", ...
-    'Error',    "SYST:ERR?", ...
-    'ConfVolt', "CONF:VOLT:DC %g", ...
-    'ConfCurr', "CONF:CURR:DC %g", ...
-    'NplcVolt', "VOLT:DC:NPLC %g", ...
-    'NplcCurr', "CURR:DC:NPLC %g", ...
-    'Autozero', "ZERO:AUTO %d", ...
-    'HighZ',    "INP:IMP:AUTO ON", ...
-    'HighZAsk', "INP:IMP:AUTO?", ...
-    'Read',     "READ?");
+% Device-dependent commands, section 3.10. Range takes the R number, which
+% is a position in the lists above. Common is everything independent of
+% function and range, in order: baseline suppression off, display the
+% electrometer and not the voltage source, read the electrometer and not
+% the buffer, data store off, voltage source output off, send the prefix
+% that flags an overflowed reading, clear the SRQ mask, stop holding the
+% bus off until X has finished, and convert once per X. Those last two are
+% what let the two meters run at the same time. ddcTell appends the X, so
+% nothing here carries one.
+DDC = struct( ...
+    'Volts',     "F0", ...
+    'Amps',      "F1", ...
+    'Range',     "R%d", ...
+    'ZeroCheck', "C%d", ...
+    'ZeroCorr',  "Z%d", ...
+    'Common',    "N0D0B0Q7O0G0M0K2T5", ...
+    'Machine',   "U0", ...
+    'Error',     "U1");
 
 
 % settle = max(RELAY, SAFETY * (switch + TAUS * R * C_LOAD + CELL)).
-% the meter's integration window is deliberately absent: READ? blocks for
-% it afterwards, so counting it here would only slow the sweep.
+% the conversion is deliberately absent: the trigger goes out after this
+% pause and the reply blocks for it, so counting it here would only slow
+% the sweep.
 
 RELAY_SETTLE  = 0.010;     % s after a relay changes. HARDWARE.md s6;
                            % the relays themselves spec 1.0 ms.
@@ -202,12 +207,12 @@ WIPER_SETTLE  = 0.001;     % s after a wiper-only change. the pot settles
                            % in ~1 us; this is the SPI round trip.
 SETTLE_SAFETY = 1.5;       % covers USB jitter and pause() granularity
 RC_TAU_COUNT  = 7;         % time constants. e^-7 is 0.09%.
-C_LOAD        = 300e-12;   % F, leads plus meter input capacitance
+C_LOAD        = 300e-12;   % F, dominated by the leads. the 617 puts
+                           % 20 pF of it across the load.
 CELL_SETTLE   = 0;         % s for the cell's own junction capacitance.
                            % unmeasured, and the term that could actually
                            % matter. to find it: park at OPEN, take 50
-                           % readings at NPLC 0.02, see where it stops
-                           % moving.
+                           % readings and see where they stop moving.
 
 %% =====================================================================
 %  Run
@@ -270,23 +275,19 @@ cfg.Edfa = struct( ...
     'Verify',       EDFA_VERIFY);
 
 cfg.Dmm = struct( ...
-    'Enabled',    DMM_ENABLED, ...
-    'Backend',    DMM_BACKEND, ...
-    'VAddress',   DMM_V_ADDRESS, ...
-    'IAddress',   DMM_I_ADDRESS, ...
-    'Baud',       DMM_BAUD, ...
-    'Terminator', DMM_TERMINATOR, ...
-    'Timeout',    DMM_TIMEOUT, ...
-    'Nplc',       DMM_NPLC, ...
-    'LineFreq',   DMM_LINE_FREQ, ...
-    'Autozero',   DMM_AUTOZERO, ...
-    'VRange',     DMM_V_RANGE, ...
-    'IRange',     DMM_I_RANGE, ...
-    'IRanges',    DMM_I_RANGES, ...
-    'HighZ',      DMM_HIGHZ, ...
-    'Parallel',   DMM_PARALLEL, ...
-    'MaxFaults',  DMM_MAX_FAULTS, ...
-    'Scpi',       SCPI);
+    'Enabled',     DMM_ENABLED, ...
+    'VAddress',    DMM_V_ADDRESS, ...
+    'IAddress',    DMM_I_ADDRESS, ...
+    'Timeout',     DMM_TIMEOUT, ...
+    'Conversion',  DMM_CONVERSION, ...
+    'ZeroCorrect', DMM_ZERO_CORRECT, ...
+    'VRange',      DMM_V_RANGE, ...
+    'VRanges',     DMM_V_RANGES, ...
+    'IRange',      DMM_I_RANGE, ...
+    'IRanges',     DMM_I_RANGES, ...
+    'Parallel',    DMM_PARALLEL, ...
+    'MaxFaults',   DMM_MAX_FAULTS, ...
+    'Ddc',         DDC);
 
 cfg.Timing = struct( ...
     'RelaySettle', RELAY_SETTLE, ...
@@ -397,8 +398,8 @@ function runEdfaCheck(cfg)
 end
 
 function runMeterCheck(cfg)
-% Meters only, so the SCPI dialect and the wiring can be checked before a
-% sweep depends on them.
+% Meters only, so the command dialect and the wiring can be checked before
+% a sweep depends on them.
 
     if ~cfg.Dmm.Enabled
         error("PVLoad:MetersDisabled", ...
@@ -410,8 +411,8 @@ function runMeterCheck(cfg)
 
     setCurrentRange(meas, cfg.Levels.IscFull, cfg);
 
-    fprintf("\nAperture %.1f ms per reading at NPLC %g.\n", ...
-        1e3 * meterAperture(cfg), cfg.Dmm.Nplc);
+    fprintf("\nOne conversion takes about %.0f ms.\n", ...
+        1e3 * cfg.Dmm.Conversion);
     fprintf("Ten readings:\n");
     for k = 1:10
         [v, i, fault] = readPoint(meas, cfg);
@@ -545,16 +546,35 @@ function assertConfig(cfg)
     end
 
     D = cfg.Dmm;
-    mustBeOneOf(D.Backend, ["visa" "serial"], "DMM_BACKEND");
     if D.Enabled && D.VAddress == D.IAddress
         error("PVLoad:MeterAddressConflict", ...
             "Both meters are set to %s. They need separate addresses.", ...
             D.VAddress);
     end
-    if D.Enabled && D.Timeout <= meterAperture(cfg)
+    if D.Enabled && D.Timeout <= D.Conversion
         error("PVLoad:MeterTimeoutTooShort", ...
-            "DMM_TIMEOUT is %g s but one reading takes %.2f s at NPLC %g.", ...
-            D.Timeout, meterAperture(cfg), D.Nplc);
+            "DMM_TIMEOUT is %g s but one conversion takes %g s.", ...
+            D.Timeout, D.Conversion);
+    end
+    if D.Enabled
+        % Every range is named, so one that does not exist is a config
+        % error here rather than something the meter sorts out later.
+        rangeCode(D.VRange, D.VRanges, "DMM_V_RANGE");
+        if D.IRange > 0
+            rangeCode(D.IRange, D.IRanges, "DMM_I_RANGE");
+        end
+    end
+    if D.Enabled && cfg.Levels.VocFull > D.VRange
+        error("PVLoad:VocAboveMeterRange", ...
+            "VOC_FULL is %g V but DMM_V_RANGE is %g V, so the OPEN point " + ...
+            "would overflow.", cfg.Levels.VocFull, D.VRange);
+    end
+    if D.Enabled && cfg.Levels.IscFull > max(D.IRanges)
+        error("PVLoad:IscAboveMeterRange", ...
+            "ISC_FULL is %g A and the 617 stops at %g A. Nothing in the " + ...
+            "instrument goes higher, so the cell has to be measured " + ...
+            "through a shunt or at a lower illumination.", ...
+            cfg.Levels.IscFull, max(D.IRanges));
     end
 end
 
@@ -791,8 +811,8 @@ function reportPlan(cfg, plan, levels)
     end
 
     if cfg.Dmm.Enabled
-        fprintf("Meters: %s, NPLC %g, aperture %.1f ms%s.\n", ...
-            cfg.Dmm.Backend, cfg.Dmm.Nplc, 1e3 * meterAperture(cfg), ...
+        fprintf("Meters: two Keithley 617, %.0f ms per conversion%s.\n", ...
+            1e3 * cfg.Dmm.Conversion, ...
             ternary(cfg.Dmm.Parallel, ", overlapped", ""));
     else
         fprintf("Meters: none. Voltage and current will be logged as NaN.\n");
@@ -818,7 +838,7 @@ function t = estimatePointTime(cfg, plan)
 
     if cfg.Dmm.Enabled
         reads = 1 + double(~cfg.Dmm.Parallel);   % overlapped or one at a time
-        t = t + reads * meterAperture(cfg) + 0.02;
+        t = t + reads * cfg.Dmm.Conversion + 0.02;
     end
 end
 
@@ -1285,11 +1305,11 @@ function meas = connectMeters(cfg)
         return
     end
 
-    meas.V = openScpi(cfg, cfg.Dmm.VAddress, "voltage");
-    meas.I = openScpi(cfg, cfg.Dmm.IAddress, "current");
+    meas.V = openMeter(cfg, cfg.Dmm.VAddress, "voltage");
+    meas.I = openMeter(cfg, cfg.Dmm.IAddress, "current");
 
-    meas.VId = scpiQuery(meas.V, cfg.Dmm.Scpi.Ident, cfg);
-    meas.IId = scpiQuery(meas.I, cfg.Dmm.Scpi.Ident, cfg);
+    meas.VId = identifyMeter(meas.V, "voltage", cfg);
+    meas.IId = identifyMeter(meas.I, "current", cfg);
     fprintf("Voltage meter: %s\n", meas.VId);
     fprintf("Current meter: %s\n", meas.IId);
 
@@ -1299,104 +1319,137 @@ function meas = connectMeters(cfg)
     meas.Enabled = true;
 end
 
-function handle = openScpi(cfg, address, role)
-% The one place a transport is chosen. Another backend is a case here.
+function handle = openMeter(cfg, address, role)
+% The one place a transport is chosen, and on a 617 there is only the one:
+% the rear panel carries an IEEE-488 connector and nothing else.
 
     try
-        switch cfg.Dmm.Backend
-            case "visa"
-                handle = visadev(address);
-            case "serial"
-                handle = serialport(address, cfg.Dmm.Baud);
-                configureTerminator(handle, cfg.Dmm.Terminator);
-        end
+        handle = visadev(address);
         handle.Timeout = cfg.Dmm.Timeout;
+        % Replies end CR LF and the command parser ignores both, so reads
+        % match the pair and writes send the one LF writeline appends.
+        configureTerminator(handle, "CR/LF", "LF");
     catch openError
         error("PVLoad:MeterOpenFailed", ...
-            "Could not open the %s meter at %s over %s: %s\n%s", ...
-            role, address, cfg.Dmm.Backend, openError.message, ...
-            availableResources(cfg));
+            "Could not open the %s meter at %s over VISA: %s\n%s", ...
+            role, address, openError.message, availableResources());
     end
 end
 
-function text = availableResources(cfg)
+function text = availableResources()
 % Put whatever the machine can see into the failure message.
 
-    switch cfg.Dmm.Backend
-        case "visa"
-            try
-                found = visadevlist;
-                if isempty(found)
-                    text = "visadevlist found no instruments.";
-                else
-                    text = "visadevlist sees: " + ...
-                           strjoin(string(found.ResourceName), ", ");
-                end
-            catch listError
-                text = "visadevlist failed: " + string(listError.message);
-            end
-        case "serial"
-            text = "Serial ports available: " + ...
-                   strjoin(cellstr(serialportlist("available")), ", ");
+    try
+        found = visadevlist;
+        if isempty(found)
+            text = "visadevlist found no instruments.";
+        else
+            text = "visadevlist sees: " + ...
+                   strjoin(string(found.ResourceName), ", ");
+        end
+    catch listError
+        text = "visadevlist failed: " + string(listError.message);
+    end
+end
+
+function word = identifyMeter(handle, role, cfg)
+% There is no *IDN?. The U0 query returns the machine status word, which
+% opens with the model number and then spells out the whole front panel
+% setup, so one query identifies the instrument and reports its state.
+% Format is 617 F RR C Z N T O B G D Q MM K YY, figure 3-11.
+
+    word = ddcAsk(handle, cfg.Dmm.Ddc.Machine, cfg);
+    if ~startsWith(word, "617")
+        error("PVLoad:MeterNotA617", ...
+            "The %s meter answered U0 with ""%s"". A 617 opens its status " + ...
+            "word with its model number.", role, word);
     end
 end
 
 function configureMeter(handle, role, range, cfg)
+% Function and range travel together because an R number means a different
+% range in every function. Then the offset is nulled for the range just
+% selected, then the error queue is read.
 
-    S = cfg.Dmm.Scpi;
-
-    scpiWrite(handle, S.Reset);
-    scpiWrite(handle, S.Clear);
+    D = cfg.Dmm.Ddc;
 
     if role == "voltage"
-        scpiWrite(handle, sprintf(S.ConfVolt, range));
-        scpiWrite(handle, sprintf(S.NplcVolt, cfg.Dmm.Nplc));
-
-        % A 10 MOhm input across the 470 kohm OPEN path is a divider that
-        % reads 4.5% low, which lands squarely on the Voc endpoint. The
-        % 34401A ships with this off, so it is set and then confirmed.
-        if cfg.Dmm.HighZ
-            scpiWrite(handle, S.HighZ);
-            if ~contains(scpiQuery(handle, S.HighZAsk, cfg), "1")
-                error("PVLoad:HighZRefused", ...
-                    "The voltage meter would not enable its high-impedance " + ...
-                    "input. On a 10 MOhm input the Voc endpoint reads " + ...
-                    "about 4.5%% low. Check the range is 10 V or less.");
-            end
-        end
+        command = D.Volts + ...
+            sprintf(D.Range, rangeCode(range, cfg.Dmm.VRanges, "DMM_V_RANGE"));
     else
-        scpiWrite(handle, sprintf(S.ConfCurr, range));
-        scpiWrite(handle, sprintf(S.NplcCurr, cfg.Dmm.Nplc));
+        command = D.Amps + ...
+            sprintf(D.Range, rangeCode(range, cfg.Dmm.IRanges, "DMM_I_RANGE"));
     end
 
-    scpiWrite(handle, sprintf(S.Autozero, cfg.Dmm.Autozero));
+    ddcTell(handle, command + D.Common);
+    zeroCorrect(handle, cfg);
     assertMeterHappy(handle, role, cfg);
 end
 
-function assertMeterHappy(handle, role, cfg)
-% SYST:ERR? returns "+0,..." when the queue is clean. Anything else means
-% a command in the dialect above is wrong for this meter.
+function zeroCorrect(handle, cfg)
+% Section 3.10.4. Zero check shorts the input to the ranging amplifier, so
+% the offset has to be captured with it on and then applied with it off:
+% C1, Z1, C0, a conversion apart so each has taken effect before the next.
+% A correction belongs to one range, which is why this runs again whenever
+% the range moves.
 
-    reply = scpiQuery(handle, cfg.Dmm.Scpi.Error, cfg);
-    if ~startsWith(strtrim(reply), ["+0", "0,"])
+    D = cfg.Dmm.Ddc;
+
+    if ~cfg.Dmm.ZeroCorrect
+        ddcTell(handle, sprintf(D.ZeroCheck, 0));
+        return
+    end
+
+    ddcTell(handle, sprintf(D.ZeroCheck, 1) + sprintf(D.ZeroCorr, 0));
+    pause(cfg.Dmm.Conversion);
+    ddcTell(handle, sprintf(D.ZeroCorr, 1));
+    pause(cfg.Dmm.Conversion);
+    ddcTell(handle, sprintf(D.ZeroCheck, 0));
+    pause(cfg.Dmm.Conversion);
+end
+
+function assertMeterHappy(handle, role, cfg)
+% The U1 query returns the error condition word: the model number and then
+% one digit per error, figure 3-12. Anything but zeros means the 617 threw
+% a command back, which on this bench means a letter in the DDC block at
+% the top of this file is not one it knows.
+
+    word  = ddcAsk(handle, cfg.Dmm.Ddc.Error, cfg);
+    flags = extractAfter(word, "617");
+
+    if ismissing(flags) || strlength(flags) == 0 || any(char(flags) ~= '0')
         error("PVLoad:MeterRejectedSetup", ...
-            "The %s meter reported %s after configuration. The SCPI block " + ...
-            "at the top of this file is written for an Agilent 34401A; a " + ...
-            "different meter may spell these differently.", role, reply);
+            "The %s meter answered U1 with ""%s"".", role, word);
+    end
+end
+
+function code = rangeCode(range, ranges, name)
+% R1 is the most sensitive range of a function and they climb by decades,
+% so the R number is a position in the list. Table 3-12.
+
+    code = find(abs(ranges - range) <= 1e-9 * ranges, 1);
+    if isempty(code)
+        error("PVLoad:BadMeterRange", ...
+            "%s is %g. The 617 has %s.", ...
+            name, range, strjoin(string(ranges), ", "));
     end
 end
 
 function range = pickCurrentRange(iscExpected, cfg)
-% Isc scales with illumination, so the range is chosen once per level, not
-% per point: a range change is a relay operation inside the meter and 769
-% of them per level would be absurd. 0 means autorange.
+% Isc scales with illumination, so the range is chosen once per level and
+% not per point: a range change costs a fresh zero correction, and 769 of
+% those per level would be absurd.
+%
+% Autorange exists, as R0, and is not used. A range hunt inside a settled
+% point spends conversions on the wrong range, and the answer it would
+% arrive at is already known from ISC_FULL.
 
     if cfg.Dmm.IRange > 0
         range = cfg.Dmm.IRange;
         return
     end
     if isnan(iscExpected) || iscExpected <= 0
-        range = 0;
+        range = max(cfg.Dmm.IRanges);
         return
     end
 
@@ -1412,19 +1465,17 @@ function meas = setCurrentRange(meas, iscExpected, cfg)
     if ~meas.Enabled
         return
     end
-    range = pickCurrentRange(iscExpected, cfg);
-    scpiWrite(meas.I, sprintf(cfg.Dmm.Scpi.ConfCurr, range));
-    scpiWrite(meas.I, sprintf(cfg.Dmm.Scpi.NplcCurr, cfg.Dmm.Nplc));
-    scpiWrite(meas.I, sprintf(cfg.Dmm.Scpi.Autozero, cfg.Dmm.Autozero));
+    configureMeter(meas.I, "current", pickCurrentRange(iscExpected, cfg), cfg);
 end
 
 function [volts, amps, fault] = readPoint(meas, cfg)
 % Both meters are triggered before either reply is collected, so the two
-% integration windows overlap. At NPLC 1 with autozero that is 67 ms per
-% point instead of 107 ms.
+% conversions overlap. T5 makes the X that ends a command the trigger, and
+% K2 stops the 617 holding the bus off until that conversion finishes,
+% which is what lets the second trigger leave while the first is running.
 %
 % A timeout returns NaN rather than throwing: one dropped reading in 769 is
-% a lost row, and aborting an hour-long sweep over a USB hiccup is worse.
+% a lost row, and aborting an hour-long sweep over a bus hiccup is worse.
 
     volts = NaN;
     amps  = NaN;
@@ -1434,16 +1485,15 @@ function [volts, amps, fault] = readPoint(meas, cfg)
         return
     end
 
-    S = cfg.Dmm.Scpi;
     try
         if cfg.Dmm.Parallel
-            scpiWrite(meas.V, S.Read);
-            scpiWrite(meas.I, S.Read);
-            volts = str2double(readline(meas.V));
-            amps  = str2double(readline(meas.I));
+            ddcTell(meas.V, "");
+            ddcTell(meas.I, "");
+            volts = k617Decode(readline(meas.V));
+            amps  = k617Decode(readline(meas.I));
         else
-            volts = str2double(scpiQuery(meas.V, S.Read, cfg));
-            amps  = str2double(scpiQuery(meas.I, S.Read, cfg));
+            volts = k617Decode(ddcAsk(meas.V, "", cfg));
+            amps  = k617Decode(ddcAsk(meas.I, "", cfg));
         end
     catch
         fault = true;
@@ -1452,22 +1502,46 @@ function [volts, amps, fault] = readPoint(meas, cfg)
     fault = fault || isnan(volts) || isnan(amps);
 end
 
-function scpiWrite(handle, command)
-    writeline(handle, command);
+function value = k617Decode(reply)
+% A reading carries its own status: N for normal or O for overflow, then
+% three letters for the function, then the mantissa and exponent, figure
+% 3-9. An overflow comes back as NaN so the caller counts it as a fault,
+% because it is a full-scale number that would otherwise sit in the CSV
+% looking like a measurement.
+%
+% The prefix is required rather than optional. G0 in the setup string asks
+% for it, so a reply arriving without one is not a reading this code asked
+% for, and a status word left unread would otherwise parse as a perfectly
+% plausible number.
+%
+% Takes a string, not a port, so captured replies can drive it offline.
+
+    text   = extractBefore(strtrim(string(reply)) + ",", ",");   % G2 suffix
+    prefix = regexp(text, "^[NO](DCV|DCA|OHM|DCC|DCX)", "match", "once");
+
+    if ismissing(prefix) || startsWith(prefix, "O")
+        value = NaN;
+        return
+    end
+
+    value = str2double(extractAfter(text, strlength(prefix)));
 end
 
-function reply = scpiQuery(handle, command, cfg)
-    writeline(handle, command);
+function ddcTell(handle, command)
+% Nothing happens on a 617 until an X arrives, so every command leaves
+% through here and every one of them gets one. An empty command is a bare
+% X, which under T5 is a trigger and nothing else.
+
+    writeline(handle, command + "X");
+end
+
+function reply = ddcAsk(handle, command, cfg)
+    ddcTell(handle, command);
     reply = strtrim(string(readline(handle)));
     if strlength(reply) == 0
         error("PVLoad:MeterNoReply", ...
-            "No reply to ""%s"" within %g s.", command, cfg.Dmm.Timeout);
+            "No reply to ""%sX"" within %g s.", command, cfg.Dmm.Timeout);
     end
-end
-
-function aperture = meterAperture(cfg)
-% Autozero doubles it: the meter takes a second reading of its own offset.
-    aperture = (1 + double(cfg.Dmm.Autozero)) * cfg.Dmm.Nplc / cfg.Dmm.LineFreq;
 end
 
 function closeMeters(meas)

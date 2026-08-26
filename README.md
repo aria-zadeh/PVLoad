@@ -1,7 +1,7 @@
 # PVLoad
 
 Automated I-V curve measurement for photovoltaic cells. A programmable resistive load steps through
-769 load states while two bench multimeters record voltage and current at each one, and a fiber
+769 load states while two bench electrometers record voltage and current at each one, and a fiber
 amplifier sets the illumination so the sweep can be repeated across a range of optical powers.
 
 Hardware is a 2-layer PCB carrying two SPI digital potentiometers and three reed relays. Control is
@@ -31,8 +31,8 @@ number of steps, so the two ladders interleave and resolve finer than the 19.6 �
 Because an I-V curve is only defined at a stated illumination, a Thorlabs EDFA100P fiber amplifier
 lights the cell over a USB virtual COM port. The full sweep repeats at each requested optical power.
 
-The board contains no measurement circuitry. Voltage and current come from two bench multimeters
-addressed over VISA.
+The board contains no measurement circuitry. Voltage and current come from two Keithley 617
+programmable electrometers addressed over VISA.
 
 ![Schematic](docs/img/schematic.png)
 
@@ -77,9 +77,9 @@ a 1N4148 flyback diode across the coil. The relay has no internal diode.
 **No on-board ADC.** An integrated converter would require calibration against a bench meter, so
 the meters are used directly.
 
-**Two multimeters.** Current is measured in series and voltage in parallel; one instrument cannot do
-both simultaneously. Both are triggered before either reply is read, so their integration windows
-overlap and the readings describe the same instant.
+**Two electrometers.** Current is measured in series and voltage in parallel; one instrument cannot
+do both simultaneously. Both are triggered before either reply is read, so their conversions overlap
+and the readings describe the same instant.
 
 ## Repository layout
 
@@ -109,7 +109,7 @@ map, SPI command format, initialization requirements, timing, and BOM with part 
 |---|---|
 | Board | MATLAB R2019a+, MATLAB Support Package for Arduino Hardware, Arduino Uno, 24 V bench supply |
 | Amplifier | Thorlabs EDFA100P, USB driver, interlock shorted |
-| Meters | Two bench multimeters, Instrument Control Toolbox, vendor VISA runtime |
+| Meters | Two Keithley 617 electrometers, USB-GPIB adapter, Instrument Control Toolbox, vendor VISA runtime |
 
 No firmware to compile. The support package ships its own, and SPI transactions are issued from the
 host over USB.
@@ -119,8 +119,9 @@ Libraries separately, matching the vendor to your GPIB adapter. Without one, `vi
 `Unable to find VISA installations`; with one and no instruments attached it reports `Unable to
 find any VISA resources`.
 
-An Agilent 34401A has no USB port and requires a USB-GPIB adapter, or a USB-serial adapter with a
-null-modem cable.
+The 617 has an IEEE-488 interface and nothing else, so it requires a USB-GPIB adapter. Match the
+adapter to the installed VISA: NI-VISA drives National Instruments hardware, Keysight IO Libraries
+drive Keysight hardware.
 
 ## Setup
 
@@ -149,7 +150,7 @@ independently.
 | `"plan"` | nothing | Validate configuration, print time estimate |
 | `"board"` | Arduino | Safe state, potentiometer self-test, walk a spread of load states |
 | `"edfa"` | amplifier | Identify, report temperature and status, ramp through configured levels |
-| `"meters"` | multimeters | Identify, configure, take ten readings |
+| `"meters"` | electrometers | Identify, configure, take ten readings |
 | `"sweep"` | all | Full experiment, written to CSV |
 
 `"sweep"` enters the safe state, self-tests both potentiometers over SPI, warms up the amplifier,
@@ -177,25 +178,19 @@ hardware.
 | `SERIAL_PORT`, `EDFA_PORT` | COM ports; enumerate with `serialportlist("available")` |
 | `DMM_V_ADDRESS`, `DMM_I_ADDRESS` | VISA resource strings; enumerate with `visadevlist` |
 | `EDFA_ENABLED`, `DMM_ENABLED` | Which subsystems are attached |
-| `ISC_FULL`, `VOC_FULL`, `POWER_FULL` | Approximate cell behavior; sizes meter ranges only |
+| `ISC_FULL`, `VOC_FULL`, `POWER_FULL` | Approximate cell behavior; sizes meter ranges and prints estimates. Only `ISC_FULL` and `VOC_FULL` past a range are errors |
 | `CAL_CURRENT_MA`, `CAL_POWER_MW` | Amplifier calibration arrays |
 | `LEVEL_MODE`, `LEVEL_SPACING`, `LEVEL_VALUES` | Illumination level selection |
 | `EDFA_CURRENT_LIMIT` | Pump current ceiling; device maximum is 1000 mA |
 | `EDFA_WARMUP` | Hold at first level, in seconds |
-| `DMM_NPLC` | Meter integration time |
 | `SETTLE_TIME` | Per-state hold when no meters are attached |
 | `WRITE_CSV`, `OUT_DIR`, `RUN_TAG` | Output |
 
-`DMM_NPLC` sets integration time in power line cycles and dominates run time:
-
-| `DMM_NPLC` | Per reading | Per level |
-|---|---|---|
-| `0.02` | 0.7 ms | ~10 s |
-| `1` | 33 ms | ~40 s |
-| `10` | 333 ms | ~7 min |
-| `100` | 3.3 s | ~70 min |
-
-Valid values on a 34401A are 0.02, 0.2, 1, 10, and 100.
+The 617 has no integration-time setting, so there is nothing to trade between noise and speed. A
+conversion takes 365 ms or 780 ms depending on function and range, which fixes the run time. Both
+meters are triggered before either reply is read, so a point costs one conversion rather than two
+and a 769-state level takes about six minutes. `RUN = "plan"` prints the estimate for a given
+configuration.
 
 `R_WIPER` and `CELL_SETTLE` in Part 2 are placeholders rather than measurements. `R_WIPER` affects
 sweep ordering and printed estimates only. `CELL_SETTLE` is the settle-model term that matters most
@@ -249,22 +244,25 @@ Rows are appended per level, so an aborted run retains all completed levels.
 ## Measurement notes
 
 Connect the voltmeter across the cell terminals, upstream of the ammeter, rather than across J1 and
-J3. An ammeter measures current across an internal shunt — 5 Ω on a 34401A's 10 mA and 100 mA
-ranges — and a voltmeter downstream of that shunt reads low by the burden drop, ~80 mV at 16 mA.
-This is negligible near open circuit and dominant near short circuit.
+J3. A voltmeter downstream of the ammeter reads low by the burden drop. The 617 is a feedback
+ammeter rather than a shunt ammeter, so that drop is under 1 mV on every range but 20 mA, where it
+is 3 mV. The placement no longer changes the shape of the curve, but it costs nothing to get right.
 
-**High-Z input is disabled by default on the 34401A.** Its DC input is a fixed 10 MΩ until
-`INP:IMP:AUTO` is enabled. Against the 470 kΩ open-circuit path that forms a divider reading 4.5%
-low at the Voc endpoint. The script sets it, reads it back, and aborts if it did not take.
+**Input impedance.** The 617 presents more than 200 TΩ in parallel with 20 pF on every volts range.
+Against the 470 kΩ open-circuit path the divider error is a few parts per billion, so the `OPEN`
+state is a Voc reading rather than a loaded one.
 
-**Current range.** The per-level range picker selects 100 mA for a ~16 mA cell rather than the 1 A
-range despite the latter's smaller shunt, because meter error includes a percent-of-range floor
-fixed in absolute terms. The 5 Ω shunt places the `SHORT` state near 80 mV rather than 0 V; since
-voltage is measured at every point, `SHORT` is the lowest-voltage point on the curve. Isc is
-obtained by extrapolating to V = 0.
+**Current range.** The 617's current ranges climb by decades to 20 mA, which is the top one, so a
+~16 mA cell has exactly one range that fits. An `ISC_FULL` above 20 mA is refused at configuration
+time rather than measured on a saturated range. The range is named per level and never autoranged,
+because a range hunt inside a settled point spends conversions on the wrong range.
 
-SCPI strings are collected in a single `SCPI` struct in Part 2. Supporting a different meter is an
-edit there only.
+**Isc.** Three millivolts of burden and the 0.150 Ω relay contact put the `SHORT` state near 5 mV
+rather than at 0 V. Voltage is measured at every point, so `SHORT` is the lowest-voltage point on
+the curve rather than a point defined to be at zero. Isc is obtained by extrapolating to V = 0.
+
+Device-dependent commands are collected in a single `DDC` struct in Part 2. The dialect is
+Keithley's own rather than SCPI, so it belongs to this instrument family and does not port.
 
 ## Safety
 
