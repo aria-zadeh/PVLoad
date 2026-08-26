@@ -14,11 +14,12 @@ clc;
 %             follow on a handheld meter across J1 and J3
 %   "wiper"   board only, the pairs of states whose difference is one
 %             wiper resistance and nothing else
+%   "k3"      board only, four holds that say whether K3 closes
 %   "edfa"    amplifier only
 %   "meters"  electrometers only
 %   "sweep"   the full experiment, written to CSV
 
-RUN = "wiper";  
+RUN = "k3";  
 
 
 % to find com ports: serialportlist("available")
@@ -330,6 +331,7 @@ switch cfg.Run
     case "board",  runBoardCheck(cfg);
     case "ramp",   runRamp(cfg);
     case "wiper",  runWiperCheck(cfg);
+    case "k3",     runK3Check(cfg);
     case "edfa",   runEdfaCheck(cfg);
     case "meters", runMeterCheck(cfg);
     case "sweep",  results = runSweepAll(cfg);
@@ -494,8 +496,6 @@ function runWiperCheck(cfg)
         applyState(board, state, cfg.RampDwell);
     end
 
-    checkK3(board, cfg);
-
     enterSafeState(board);
     clear guard;
 
@@ -505,27 +505,41 @@ function runWiperCheck(cfg)
     fprintf("Returned to OPEN.\n");
 end
 
-function checkK3(board, cfg)
-% LOW bypasses U2 through K3, so U2's code cannot reach the terminals. If
-% the meter moves when it changes, K3 is not closing and U2 has been in
-% the path all along. That failure is invisible to every other test here:
-% it makes LOW and FULL read alike, which reads as a wiper resistance of
-% zero rather than as a relay that never operated.
+function runK3Check(cfg)
+% Four holds and one question: does K3 close.
 %
-% The two codes are written straight to the pots rather than pulled from
-% the plan, because no planned state exercises U2 while K3 is closed.
+% K3 shorts out U2 whenever the board is in LOW, so U2's code cannot reach
+% the terminals and all four holds have to read alike. If they do not, K3
+% never operated and U2 has been in the path the whole time. That failure
+% is invisible everywhere else on this board, because it only makes LOW and
+% FULL read the same, which looks like a component with no resistance
+% rather than a relay that did not move.
+%
+% The codes are written straight to the pots instead of coming from the
+% plan, because no planned state drives U2 while K3 is closed.
 
-    fprintf("\nK3 check. LOW shorts out U2, so U2's code must not matter\n");
-    fprintf("and all four of these must read alike. A 5 kohm swing is K3\n");
-    fprintf("failing to close.\n\n");
+    board = connectBoard(cfg);
+    guard = onCleanup(@() quietly(@() enterSafeState(board)));
+
+    enterSafeState(board);
+
+    fprintf("\nFour holds, %g s each. Write down all four.\n", cfg.RampDwell);
+    fprintf("All four alike means K3 closes. A jump of about 5000 ohm\n");
+    fprintf("between them means it does not.\n\n");
 
     setMode(board, "LOW");
-    for code = [0 255 0 255]
-        fprintf("  LOW    U1=  0  U2=%3d\n", code);
+    labels = ["A" "B" "C" "D"];
+    codes  = [0 255 0 255];
+    for k = 1:4
+        fprintf("  %s   U2 code %3d\n", labels(k), codes(k));
         drawnow;
-        setWipers(board, 0, code);
+        setWipers(board, 0, codes(k));
         pause(cfg.RampDwell);
     end
+
+    enterSafeState(board);
+    clear guard;
+    fprintf("\nDone. Returned to OPEN.\n");
 end
 
 function k = findState(plan, mode, code, cfg)
@@ -711,7 +725,7 @@ function assertConfig(cfg)
 % Catches a mistyped config block before anything is energised.
 
     mustBeOneOf(cfg.Run, ...
-        ["plan" "board" "ramp" "wiper" "edfa" "meters" "sweep"], "RUN");
+        ["plan" "board" "ramp" "wiper" "k3" "edfa" "meters" "sweep"], "RUN");
 
     if cfg.RampSteps < 2 || cfg.RampSteps > 769
         error("PVLoad:BadRampSteps", ...

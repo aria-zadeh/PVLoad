@@ -51,24 +51,47 @@ drifts, so absolute readings are not usable for anything small.
 Every figure above is a difference between two states, which cancels it. That is
 what `RUN = "wiper"` is for.
 
+## K3 does not close
+
+Confirmed with `RUN = "k3"`, which holds `LOW` and writes U2 to 0 and 255
+alternately. With K3 closed U2 is shorted out and its code cannot reach the
+terminals, so all four holds must read alike. They did not:
+
+| Hold | U2 code | Measured |
+|---|---|---|
+| A | 0 | 308 Ω |
+| B | 255 | 5.27 kΩ |
+| C | 0 | 308 Ω |
+| D | 255 | 5.27 kΩ |
+
+U2's whole ladder appears and disappears with its code, so U2 is in the path in
+`LOW` as well as in `FULL` and K3 never operates. Repeatable, and the two pairs
+match exactly.
+
+The software side is not at fault: `setMode` drives D8 high for `LOW`, matching
+section 4 of HARDWARE.md. The fault is in D8 → R4 → Q3 → the K3 coil.
+
+This one failure explains the two readings that made no sense on their own.
+`LOW` and `FULL` read alike at every code because they contain the same
+elements, and the 242 Ω between `SHORT` and the lowest pot setting is not one
+wiper plus a mystery, it is **two wipers at about 121 Ω each** — inside the
+datasheet's 75 Ω typical to 200 Ω maximum.
+
+Nothing else on the board can see this failure. It only makes two modes agree,
+which reads as a component with no resistance rather than a relay that never
+moved.
+
+Effect on a sweep: the range is unchanged at 0.150 Ω to 470 kΩ, but `LOW`
+duplicates `FULL` instead of interleaving with it, so 769 states collapse to 511
+distinct ones and the lowest load rises from about 121 Ω to about 242 Ω. Usable,
+but half the resolution the board was designed for.
+
 ## Open
 
-**K3 may not be closing.** `LOW` and `FULL` read alike at every code tried, which
-taken at face value means U2 contributes no wiper resistance. The datasheet puts
-R_W at 75 Ω typical and 200 Ω maximum, and the 242 Ω measured between `SHORT` and
-the lowest pot setting is close to two of those. Both observations are explained
-at once if K3 never closes, leaving U2 in the path in `LOW` as well as `FULL`.
-
-`RUN = "wiper"` ends with a check for exactly this. It holds `LOW` while writing
-U2 to 0 and 255 alternately. With K3 closed, U2's code cannot reach the
-terminals and all four readings match; a 5 kΩ swing is K3 failing to close.
-
-This failure is invisible to every other test on the board. It does not affect
-the range, it makes `LOW` and `FULL` collapse onto one ladder and costs the
-sweep the 256 states `LOW` contributes.
-
-**`R_WIPER` is still the 200 Ω placeholder.** The figure implied above is about
-121 Ω per device, which is inside the datasheet range. Pending the K3 result.
+**`R_WIPER` is still the 200 Ω placeholder.** About 121 Ω per device is the
+figure the measurements imply, but it should be confirmed on a board where K3
+works before it goes into the file, since the `LOW` states it also describes are
+not behaving as modelled right now.
 
 **`CELL_SETTLE` is zero and unmeasured.**
 
