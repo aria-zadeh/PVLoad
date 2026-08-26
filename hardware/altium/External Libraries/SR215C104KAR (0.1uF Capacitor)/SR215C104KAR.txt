@@ -1,0 +1,65 @@
+# Created by Ultra Librarian 8.3.384 Copyright © 1999-2024
+# Frank Frank, Accelerated Designs
+
+StartFootprints
+
+Footprint (Name "CAP_SR21_AVX")
+Pad (Name "1") (Location 0, 0) (Slotted False) (HoleSize 30) (Surface False) (Rotation 0) (ExpandMask 0) (ExpandPaste -25)
+PadShape (Size 50, 50) (Shape Rectangular) (Layer TopLayer)
+PadShape (Size 50, 50) (Shape Rectangular) (Layer BottomLayer)
+PadShape (Size 50, 50) (Shape Rectangular) (Layer MidLayer1)
+EndPad
+Pad (Name "2") (Location 200, 0) (Slotted False) (HoleSize 30) (Surface False) (Rotation 180) (ExpandMask 0) (ExpandPaste -25)
+PadShape (Size 50, 50) (Shape Rounded) (Layer TopLayer)
+PadShape (Size 50, 50) (Shape Rounded) (Layer BottomLayer)
+PadShape (Size 50, 50) (Shape Rounded) (Layer MidLayer1)
+EndPad
+Line (Width 6) (Start -10, -72.5) (End -10, 72.5) (Layer Mechanical15) 
+Line (Width 6) (Start -10, 72.5) (End 210, 72.5) (Layer Mechanical15) 
+Line (Width 6) (Start 210, 72.5) (End 210, -72.5) (Layer Mechanical15) 
+Line (Width 6) (Start 210, -72.5) (End -10, -72.5) (Layer Mechanical15) 
+Polygon (PointCount 4) (Layer Mechanical15) 
+Point (-10, -72.5)
+Point (-10, 72.5)
+Point (210, 72.5)
+Point (210, -72.5)
+EndPolygon
+Line (Width 1) (Start -85, 0) (End -35, 0) (Layer Mechanical13) 
+Line (Width 1) (Start -60, 25) (End -60, -25) (Layer Mechanical13) 
+Line (Width 1) (Start 200, 62.5) (End 0, 62.5) (Layer Mechanical13) 
+Line (Width 1) (Start 200, -62.5) (End 0, -62.5) (Layer Mechanical13) 
+Line (Width 1) (Start 200, 62.5) (End 200, -62.5) (Layer Mechanical13) 
+Line (Width 1) (Start 0, 62.5) (End 0, -62.5) (Layer Mechanical13) 
+Text (Location -37.5, -25) (Height 50) (Width 3) (Rotation 0) (Layer Mechanical13) (Value ".Designator")
+Text (Location -37.5, -25) (Height 50) (Width 3) (Rotation 0) (Layer TopOverlay) (Value ".Designator")
+Line (Width 6) (Start -85, 0) (End -38.10000038, 0) (Layer TopOverlay) 
+Line (Width 6) (Start -60, 25) (End -60, -25) (Layer TopOverlay) 
+Line (Width 6) (Start 205, 67.5) (End -5, 67.5) (Layer TopOverlay) 
+Line (Width 6) (Start 205, -67.5) (End -5, -67.5) (Layer TopOverlay) 
+Line (Width 6) (Start 205, 67.5) (End 205, 37.77049151) (Layer TopOverlay) 
+Line (Width 6) (Start -5, 67.5) (End -5, 38.10000038) (Layer TopOverlay) 
+Line (Width 6) (Start -5, -38.10000038) (End -5, -67.5) (Layer TopOverlay) 
+Line (Width 6) (Start 205, -37.77049151) (End 205, -67.5) (Layer TopOverlay) 
+Step (Name CAP_SR21_AVX.step)
+EndFootprint
+EndFootprints
+
+StartComponents
+
+Component (Name "SR215C104KAR") (PartCount 1) (DesPrefix "C?")
+Pin (Location 200, 0) (Rotation 0) (PinType Passive) (Length 100) (Width 0) (Designator Hidden "2") (Name Hidden "2") (PinSwap 1) (PartSwap 1) (PinSeq 2) (Part 1)
+Pin (Location 100, 0) (Rotation 180) (PinType Passive) (Length 100) (Width 0) (Designator Hidden "1") (Name Hidden "1") (PinSwap 1) (PartSwap 1) (PinSeq 1) (Part 1)
+Line (Width 8) (Start 137, -75) (End 137, 75) (Part 1)
+Line (Width 8) (Start 162, -75) (End 162, 75) (Part 1)
+Line (Width 8) (Start 162, 0) (End 200, 0) (Part 1)
+Line (Width 8) (Start 100, 0) (End 137, 0) (Part 1)
+Parameter (Name "Copyright") (Location 0, 0) (Height 50) (Rotation 0) (Justification Center) (Value "Copyright (C) 2026 Ultra Librarian. All rights reserved.") (Part 1)
+Parameter (Name "Manufacturer_Name") (Location 0, 0) (Height 50) (Rotation 0) (Justification Center) (Value "KYOCERA AVX") (Part 1)
+Parameter (Name "Manufacturer_Part_Number") (Location 0, 0) (Height 50) (Rotation 0) (Justification Center) (Value "SR215C104KAR") (Part 1)
+Parameter (Name "Type") (Location 150, -300) (Height 137) (Rotation 0) (Justification Center) (Value "") (Part 1)
+Parameter (Name "RefDes") (Location 150, 150) (Height 137) (Rotation 0) (Justification Center) (Value "") (Part 1)
+Description (Value "No Description Available") (Part 1)
+Comment (Value "SR215C104KAR") (Part 1)
+Footprint (Name "CAP_SR21_AVX")
+EndComponent
+EndComponents

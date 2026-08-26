@@ -1,0 +1,21 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Altium and CAD binaries: never touch line endings, never try to diff.
+*.PcbDoc   binary
+*.SchDoc   binary
+*.PcbLib   binary
+*.SchLib   binary
+*.PrjPcb   binary
+*.OutJob   binary
+*.step     binary
+*.stp      binary
+*.STEP     binary
+*.pdf      binary
+*.png      binary
+
+# MATLAB live scripts are zipped XML.
+*.mlx      binary
+
+# Gerber and drill files are plain text but should not be diffed in reviews.
+hardware/gerbers/** -diff

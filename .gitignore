@@ -1,0 +1,27 @@
+# MATLAB autosave and session artifacts
+*.asv
+*.autosave
+slprj/
+
+# stray PowerShell redirect artifact
+$null
+
+# Altium local working files: auto-generated backups, previews and logs.
+# They are recreated by Altium and add ~90 MB of churn to the repo.
+History/
+__Previews/
+Project Logs for */
+Project Outputs for */
+
+# Vendor datasheets are kept locally for convenience but not redistributed.
+hardware/altium/Datasheets/
+
+# Full project backup archive, kept on disk only.
+hardware/altium/PVLoad-project-backup.zip
+
+# Sweep output is per-run measurement data, not source.
+data/sweep_data/*
+!data/sweep_data/.gitkeep
+
+# Vendor manual, kept locally, not redistributed.
+docs/manual_ttn118382-d02.pdf

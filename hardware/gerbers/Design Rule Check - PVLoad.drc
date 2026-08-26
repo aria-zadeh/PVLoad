@@ -1,0 +1,75 @@
+Protel Design System Design Rule Check
+PCB File : C:\Users\arian\Desktop\Altium\PVLoad\PVLoad.PcbDoc
+Date     : 8/7/2026
+Time     : 12:28:35 PM
+
+WARNING: Unplated multi-layer pad(s) detected
+   Pad Free-1(3287.402mil,3759.843mil) on Multi-Layer on Net GND
+   Pad Free-3(3287.402mil,118.11mil) on Multi-Layer on Net GND
+   Pad Free-0(118.11mil,3759.843mil) on Multi-Layer on Net GND
+   Pad Free-2(118.11mil,118.11mil) on Multi-Layer on Net GND
+
+Processing Rule : Clearance Constraint (Gap=5mil) (All),(All)
+Rule Violations :0
+
+Processing Rule : Short-Circuit Constraint (Allowed=No) (All),(All)
+Rule Violations :0
+
+Processing Rule : Un-Routed Net Constraint ( (All) )
+Rule Violations :0
+
+Processing Rule : Modified Polygon (Allow modified: No), (Allow shelved: No)
+Rule Violations :0
+
+Processing Rule : Width Constraint (Min=10mil) (Max=78.74mil) (Preferred=19.685mil) (All)
+Rule Violations :0
+
+Processing Rule : Width Constraint (Min=7.874mil) (Max=78.74mil) (Preferred=9.842mil) (All)
+Rule Violations :0
+
+Processing Rule : Width Constraint (Min=15.748mil) (Max=78.74mil) (Preferred=19.685mil) (InNet('+24V') or InNet('+5V') or InNet('GND'))
+Rule Violations :0
+
+Processing Rule : Routing Topology Rule(Topology=Shortest) (All)
+Rule Violations :0
+
+Processing Rule : Routing Via (MinHoleWidth=10mil) (MaxHoleWidth=100mil) (PreferredHoleWidth=28mil) (MinWidth=20mil) (MaxWidth=200mil) (PreferedWidth=50mil) (All)
+Rule Violations :0
+
+Processing Rule : Power Plane Connect Rule(Relief Connect )(Expansion=20mil) (Conductor Width=10mil) (Air Gap=10mil) (Entries=4) (All)
+Rule Violations :0
+
+Processing Rule : Minimum Annular Ring (Minimum=0mil) (All)
+Rule Violations :0
+
+Processing Rule : Hole Size Constraint (Min=10mil) (Max=100mil) (All)
+Rule Violations :0
+
+Processing Rule : Hole To Hole Clearance (Gap=10mil) (All),(All)
+Rule Violations :0
+
+Processing Rule : Minimum Solder Mask Sliver (Gap=10mil) (All),(All)
+Rule Violations :0
+
+Processing Rule : Silk To Solder Mask (Clearance=0mil) (IsPad),(All)
+Rule Violations :0
+
+Processing Rule : Silk to Silk (Clearance=0mil) (All),(All)
+Rule Violations :0
+
+Processing Rule : Net Antennae (Tolerance=0mil) (All)
+Rule Violations :0
+
+Processing Rule : Board Clearance Constraint (Gap=0mil) (All)
+Rule Violations :0
+
+Processing Rule : Component Clearance Constraint ( Horizontal Gap = 10mil, Vertical Gap = 10mil ) (All),(All) 
+Rule Violations :0
+
+Processing Rule : Height Constraint (Min=0mil) (Max=1000mil) (Prefered=500mil) (All)
+Rule Violations :0
+
+
+Violations Detected : 0
+Waived Violations : 0
+Time Elapsed        : 00:00:01

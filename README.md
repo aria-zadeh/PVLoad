@@ -1,0 +1,306 @@
+# PVLoad
+
+Automated I-V curve measurement for photovoltaic cells. A programmable resistive load steps through
+769 load states while two bench multimeters record voltage and current at each one, and a fiber
+amplifier sets the illumination so the sweep can be repeated across a range of optical powers.
+
+Hardware is a 2-layer PCB carrying two SPI digital potentiometers and three reed relays. Control is
+MATLAB, over an Arduino Uno.
+
+![PCB 3D render](docs/img/pcb-3d.png)
+
+## Overview
+
+A cell's operating point depends on its load, so characterizing one means sweeping the load and
+recording voltage and current at each step. This board replaces a manually adjusted resistor with
+two MCP41HV51 digital potentiometers in series and three reed relays, giving 769 distinct load
+states from 0.150 Ω to 470 kΩ under software control.
+
+Relays reconfigure the topology to reach the ends of the curve, which the potentiometers cannot:
+
+| Mode | Relay action | Region |
+|---|---|---|
+| `SHORT` | Bypass the whole load | Short-circuit current |
+| `LOW` | Bypass the second potentiometer | ~200 Ω to 5 kΩ |
+| `FULL` | Both potentiometers in series | ~400 Ω to 10 kΩ |
+| `OPEN` | 470 kΩ in series | Open-circuit voltage |
+
+`LOW` and `FULL` start from one and two wiper resistances respectively. The offset is not an integer
+number of steps, so the two ladders interleave and resolve finer than the 19.6 Ω step size.
+
+Because an I-V curve is only defined at a stated illumination, a Thorlabs EDFA100P fiber amplifier
+lights the cell over a USB virtual COM port. The full sweep repeats at each requested optical power.
+
+The board contains no measurement circuitry. Voltage and current come from two bench multimeters
+addressed over VISA.
+
+![Schematic](docs/img/schematic.png)
+
+## Specifications
+
+| Parameter | Value |
+|---|---|
+| Load range, both potentiometers | ~400 Ω to 10 kΩ |
+| Load range, one potentiometer bypassed | ~200 Ω to 5 kΩ |
+| Step size | ~19.6 Ω |
+| Load states per sweep | 769 |
+| Short-circuit path | 0.150 Ω relay contact |
+| Open-circuit path | 470 kΩ |
+| Cell under test | ≤9 V open circuit, ≤16 mA short circuit |
+| Illumination | Thorlabs EDFA100P, 0–1000 mA pump current over USB |
+| Control | SPI from an Arduino Uno, driven from MATLAB |
+| Supplies | 24 V bench supply (analog), 5 V from the Arduino (logic) |
+| Board | 2-layer, hand-assembled |
+
+## Design notes
+
+**Two potentiometers.** A single MCP41HV51-502 is 5 kΩ end to end. Two in series reach 10 kΩ and
+produce the interleaved ladders described above.
+
+**High-voltage potentiometer.** The MCP41HV51 separates its resistor-network supply from its logic
+supply, so the network runs at 24 V while logic runs at 5 V. A cell reaching 9 V would clip a
+part powered from the logic rail alone. This is why the board takes two supplies and why power
+sequencing matters.
+
+**Reed relays.** At 16 mA, contacts operate in dry-circuit conditions where silver-alloy power
+contacts can develop surface films and read as intermittent opens. A sealed reed capsule avoids
+this and holds contact resistance to 0.150 Ω, which sets the short-circuit endpoint. Coils draw
+10 mA each and run from the Arduino's 5 V pin.
+
+**Relay topology.** Every relay is wired in parallel with an element, never in series, since a
+series relay could only break the loop. The open-circuit end is therefore a 470 kΩ resistor that K1
+shorts out for the rest of the sweep, passing ~19 µA at 9 V.
+
+**Coil drivers.** Each coil is switched by a 2N3904 low-side NPN through a 1 kΩ base resistor, with
+a 1N4148 flyback diode across the coil. The relay has no internal diode.
+
+**No on-board ADC.** An integrated converter would require calibration against a bench meter, so
+the meters are used directly.
+
+**Two multimeters.** Current is measured in series and voltage in parallel; one instrument cannot do
+both simultaneously. Both are triggered before either reply is read, so their integration windows
+overlap and the readings describe the same instant.
+
+## Repository layout
+
+```
+docs/
+  HARDWARE.md      Topology, pin map, SPI protocol, BOM
+  DECISIONS.md     Design rationale and open questions
+  img/             Schematic and PCB renders
+hardware/
+  altium/          Altium project, footprint and symbol libraries, STEP model
+  gerbers/         Gerber X2 and NC drill files
+  bom.pdf          Bill of materials
+matlab/
+  PVLoad_Main.m    Sweep controller, amplifier driver, meter driver
+  test_arduino.m   Pin-by-pin bench test of the Arduino alone
+data/
+  sweep_data/      CSV output
+```
+
+[`docs/HARDWARE.md`](docs/HARDWARE.md) is the hardware reference: node-by-node topology, Arduino pin
+map, SPI command format, initialization requirements, timing, and BOM with part selection reasoning.
+[`docs/DECISIONS.md`](docs/DECISIONS.md) covers software design rationale and unresolved items.
+
+## Requirements
+
+| Component | Requires |
+|---|---|
+| Board | MATLAB R2019a+, MATLAB Support Package for Arduino Hardware, Arduino Uno, 24 V bench supply |
+| Amplifier | Thorlabs EDFA100P, USB driver, interlock shorted |
+| Meters | Two bench multimeters, Instrument Control Toolbox, vendor VISA runtime |
+
+No firmware to compile. The support package ships its own, and SPI transactions are issued from the
+host over USB.
+
+Instrument Control Toolbox does not include a VISA implementation. Install NI-VISA or Keysight IO
+Libraries separately, matching the vendor to your GPIB adapter. Without one, `visadevlist` reports
+`Unable to find VISA installations`; with one and no instruments attached it reports `Unable to
+find any VISA resources`.
+
+An Agilent 34401A has no USB port and requires a USB-GPIB adapter, or a USB-serial adapter with a
+null-modem cable.
+
+## Setup
+
+Order matters. The cell is a supply, so it goes in last and comes out first — see
+[Safety](#safety).
+
+1. Connect the Arduino to the board through the 1x10 header.
+2. Connect the bench supply to J2 (+24 V) and J3 (GND).
+3. Connect the cell to J1 (PV+) and J3 (GND), with the ammeter in series on the PV+ lead, and
+   keep it dark for now.
+4. Connect the voltmeter across the cell terminals, upstream of the ammeter. Not across J1 and J3 —
+   see [Measurement notes](#measurement-notes).
+5. Power up 24 V first, then the Arduino.
+6. Set `RUN` and the port and address settings in Part 1 of `matlab/PVLoad_Main.m`, and start it.
+7. Illuminate the cell once the script is running and the relays are in a defined state.
+
+Shut down in reverse: darken the cell, then the Arduino's 5 V, then 24 V.
+
+## Usage
+
+`RUN` selects the mode. Each opens only the hardware it needs, so subsystems can be brought up
+independently.
+
+| `RUN` | Opens | Purpose |
+|---|---|---|
+| `"plan"` | nothing | Validate configuration, print time estimate |
+| `"board"` | Arduino | Safe state, potentiometer self-test, walk a spread of load states |
+| `"edfa"` | amplifier | Identify, report temperature and status, ramp through configured levels |
+| `"meters"` | multimeters | Identify, configure, take ten readings |
+| `"sweep"` | all | Full experiment, written to CSV |
+
+`"sweep"` enters the safe state, self-tests both potentiometers over SPI, warms up the amplifier,
+then steps through every load state at every illumination level:
+
+```
+[lvl 2  450 mA] [  42/ 769] LOW    U1= 41  U2=  0  ~   1004.1 ohm   V=  6.21180  I=   9.8340 mA
+```
+
+Press Ctrl-C once and wait ~3 seconds to abort. The cleanup handler disables the pump and returns
+the board to `OPEN`.
+
+`SELF_TEST = false` skips potentiometer readback, allowing the control flow to run on a bare Arduino
+with the board disconnected.
+
+## Configuration
+
+`PVLoad_Main.m` is split into two parts. Part 1 holds the settings intended to be changed. Part 2
+describes the pin map, amplifier protocol, and meter command set, and changes only with the
+hardware.
+
+| Setting | Description |
+|---|---|
+| `RUN` | Mode, per the table above |
+| `SERIAL_PORT`, `EDFA_PORT` | COM ports; enumerate with `serialportlist("available")` |
+| `DMM_V_ADDRESS`, `DMM_I_ADDRESS` | VISA resource strings; enumerate with `visadevlist` |
+| `EDFA_ENABLED`, `DMM_ENABLED` | Which subsystems are attached |
+| `ISC_FULL`, `VOC_FULL`, `POWER_FULL` | Approximate cell behavior; sizes meter ranges only |
+| `CAL_CURRENT_MA`, `CAL_POWER_MW` | Amplifier calibration arrays |
+| `LEVEL_MODE`, `LEVEL_SPACING`, `LEVEL_VALUES` | Illumination level selection |
+| `EDFA_CURRENT_LIMIT` | Pump current ceiling; device maximum is 1000 mA |
+| `EDFA_WARMUP` | Hold at first level, in seconds |
+| `DMM_NPLC` | Meter integration time |
+| `SETTLE_TIME` | Per-state hold when no meters are attached |
+| `WRITE_CSV`, `OUT_DIR`, `RUN_TAG` | Output |
+
+`DMM_NPLC` sets integration time in power line cycles and dominates run time:
+
+| `DMM_NPLC` | Per reading | Per level |
+|---|---|---|
+| `0.02` | 0.7 ms | ~10 s |
+| `1` | 33 ms | ~40 s |
+| `10` | 333 ms | ~7 min |
+| `100` | 3.3 s | ~70 min |
+
+Valid values on a 34401A are 0.02, 0.2, 1, 10, and 100.
+
+`R_WIPER` and `CELL_SETTLE` in Part 2 are placeholders rather than measurements. `R_WIPER` affects
+sweep ordering and printed estimates only. `CELL_SETTLE` is the settle-model term that matters most
+at high resistance. Measure both and replace them.
+
+### Illumination levels
+
+| `LEVEL_MODE` | `LEVEL_VALUES` | Calibration required |
+|---|---|---|
+| `"current"` | Pump currents, mA | No |
+| `"power"` | Optical powers, mW | Yes |
+| `"table"` | Ignored; uses every calibration point | Yes |
+
+`LEVEL_SPACING` is `"list"` for literal values, or `"linear"` or `"log"` to read `LEVEL_VALUES` as
+`[min max]` and generate `LEVEL_COUNT` points. Use `"log"` when selecting by power, since Voc scales
+logarithmically with illumination.
+
+### Amplifier calibration
+
+The EDFA100P exposes pump current, not optical power, so the relationship must be measured once and
+supplied as two index-matched arrays in Part 1:
+
+```matlab
+CAL_CURRENT_MA = [ 100  150  200  250  300  400  500  600];
+CAL_POWER_MW   = [0.05  0.8  4.1  9.6   18   42   72  105];
+```
+
+Couple the amplifier output into an optical power meter, step the pump current from the standby
+threshold to `EDFA_CURRENT_LIMIT`, and record each pair. Ten to fifteen points is sufficient, with
+higher density near the threshold knee. Both arrays must be the same length and strictly increasing.
+Interpolation is linear and requested powers outside the measured range are rejected rather than
+extrapolated.
+
+Leave both empty and use `LEVEL_MODE = "current"` until measured.
+
+## Output
+
+`"sweep"` writes two timestamped CSVs to `data/sweep_data/`:
+
+- `pvload_<stamp>.csv` — one row per point: `timestamp`, `level_index`, `level_current_ma`,
+  `level_power_mw`, `level_valid`, `state_index`, `mode`, `u1_code`, `u2_code`, `r_nominal_ohm`,
+  `voltage_v`, `current_a`, `resistance_ohm`, `power_w`, `settle_s`.
+- `pvload_<stamp>_levels.csv` — one row per illumination level: pump current readback, pump
+  temperature, meter range, failed reading count, and amplifier state at level end.
+
+`resistance_ohm` and `power_w` are derived from measured voltage and current. `r_nominal_ohm` is the
+model estimate used to order the sweep and is not a measurement.
+
+Rows are appended per level, so an aborted run retains all completed levels.
+
+## Measurement notes
+
+Connect the voltmeter across the cell terminals, upstream of the ammeter, rather than across J1 and
+J3. An ammeter measures current across an internal shunt — 5 Ω on a 34401A's 10 mA and 100 mA
+ranges — and a voltmeter downstream of that shunt reads low by the burden drop, ~80 mV at 16 mA.
+This is negligible near open circuit and dominant near short circuit.
+
+**High-Z input is disabled by default on the 34401A.** Its DC input is a fixed 10 MΩ until
+`INP:IMP:AUTO` is enabled. Against the 470 kΩ open-circuit path that forms a divider reading 4.5%
+low at the Voc endpoint. The script sets it, reads it back, and aborts if it did not take.
+
+**Current range.** The per-level range picker selects 100 mA for a ~16 mA cell rather than the 1 A
+range despite the latter's smaller shunt, because meter error includes a percent-of-range floor
+fixed in absolute terms. The 5 Ω shunt places the `SHORT` state near 80 mV rather than 0 V; since
+voltage is measured at every point, `SHORT` is the lowest-voltage point on the curve. Isc is
+obtained by extrapolating to V = 0.
+
+SCPI strings are collected in a single `SCPI` struct in Part 2. Supporting a different meter is an
+edit there only.
+
+## Safety
+
+The EDFA100P is a **Class 3B** source at 1550 nm, which is invisible.
+
+- Output is never dark while the unit is enabled. It emits up to 30 mW of amplified spontaneous
+  emission with no optical input, regardless of pump current.
+- The rear interlock must be shorted for the amplifier to enable. If it opens, the unit shuts down
+  and the software will not re-enable it.
+- Terminate the output before running. Do not look into the fiber bulkhead.
+
+Electrical:
+
+- 24 V must come up before 5 V, and 5 V must come down first. D4, a Schottky from +5 V to +24 V,
+  clamps the rails if the sequence is wrong, but it does not make the board usable on 5 V alone:
+  V+ then sits about 0.35 V below VL, far below the 10 V the resistor network needs. There is no
+  overvoltage protection, and a bench supply connected backwards gives the Arduino's 5 V rail a
+  current path through D4.
+- **The cell is a supply, so it belongs in the sequence too: illuminate it last, darken it first.**
+  PV+ reaches U1's P0B, through R1 normally and directly through K1's contacts once K1 is energized.
+  The datasheet limits those pins to `V+ + 0.3 V`, so a lit cell on an unpowered board is roughly
+  8.7 V past absolute maximum. With all relays released, R1 holds that to ~19 µA against a ±20 mA
+  clamp rating, which is harmless. But if 24 V drops out while 5 V is still up and K1 is closed, R1
+  is shorted and the cell's full ~16 mA goes into the clamp — 80% of the absolute maximum, and the
+  case that destroys a chip. D4 does not protect this path; it sits between the rails. Blocking the
+  light is equivalent to unplugging and easier on the jacks. `docs/HARDWARE.md` §7 has the ratings.
+- Never close the short-circuit relay during an open-circuit reading. A 0.150 Ω contact in parallel
+  with 470 kΩ collapses the reading to roughly 0 V.
+- Do not calculate resistance from the wiper code. The potentiometers carry ±20% tolerance and
+  wiper resistance at a 24 V span is not characterized. Work from measured voltage and current.
+
+## Testing without the board
+
+`matlab/test_arduino.m` verifies that every pin the design uses can drive and read, using only the
+Arduino, a USB cable, a multimeter, and jumper wires. It includes an SPI loopback test.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
