@@ -21,8 +21,8 @@ Relays reconfigure the topology to reach the ends of the curve, which the potent
 | Mode | Relay action | Region |
 |---|---|---|
 | `SHORT` | Bypass the whole load | Short-circuit current |
-| `LOW` | Bypass the second potentiometer | ~200 Ω to 5 kΩ |
-| `FULL` | Both potentiometers in series | ~400 Ω to 10 kΩ |
+| `LOW` | Bypass the second potentiometer | ~155 Ω to 5.2 kΩ |
+| `FULL` | Both potentiometers in series | ~310 Ω to 10.3 kΩ |
 | `OPEN` | 470 kΩ in series | Open-circuit voltage |
 
 `LOW` and `FULL` start from one and two wiper resistances respectively. The offset is not an integer
@@ -40,8 +40,8 @@ programmable electrometers addressed over VISA.
 
 | Parameter | Value |
 |---|---|
-| Load range, both potentiometers | ~400 Ω to 10 kΩ |
-| Load range, one potentiometer bypassed | ~200 Ω to 5 kΩ |
+| Load range, both potentiometers | ~310 Ω to 10.3 kΩ |
+| Load range, one potentiometer bypassed | ~155 Ω to 5.2 kΩ |
 | Step size | ~19.6 Ω |
 | Load states per sweep | 769 |
 | Short-circuit path | 0.150 Ω relay contact |
@@ -152,6 +152,8 @@ independently.
 | `"board"` | Arduino | Safe state, potentiometer self-test, walk a spread of load states |
 | `"ramp"` | Arduino | Climb the resistance range slowly enough to follow on a handheld meter |
 | `"wiper"` | Arduino | Park at the state pairs whose difference is one wiper resistance |
+| `"k3"` | Arduino | Four holds that say whether K3 closes |
+| `"verify"` | Arduino | Seven holds that exercise every part of a freshly built board |
 | `"edfa"` | amplifier | Identify, report temperature and status, ramp through configured levels |
 | `"meters"` | electrometers | Identify, configure, take ten readings |
 | `"sweep"` | all | Full experiment, written to CSV |
@@ -223,9 +225,9 @@ Neither difference contains the leads, the jacks or K1. `Rw2` is a switch rather
 so the same value should come back at every code in `WIPER_CODES`; one that tracks the code is
 `R_AB` being wrong instead.
 
-`R_WIPER` and `CELL_SETTLE` in Part 2 are placeholders rather than measurements. `R_WIPER` affects
-sweep ordering and printed estimates only. `CELL_SETTLE` is the settle-model term that matters most
-at high resistance. Measure both and replace them.
+`R_WIPER` is 155 Ω per device, measured with `RUN = "verify"` on the assembled board and recorded
+in [docs/BRINGUP.md](docs/BRINGUP.md). `CELL_SETTLE` is still a placeholder at zero, and it is the
+settle-model term that matters most at high resistance. Measure and replace it.
 
 ### Illumination levels
 

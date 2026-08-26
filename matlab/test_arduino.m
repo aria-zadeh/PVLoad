@@ -52,7 +52,17 @@
 %                   the SPI hardware itself, which is what the DigiPots
 %                   will hang off.
 %
-% Run the tests in that order. Each is independent.
+%   "one_pin"       Drives a single pin, set by ONE_PIN, HIGH and LOW on a
+%                   slow cycle so it can be followed downstream with a
+%                   voltmeter. Unlike the tests above this one is meant to
+%                   be run with the PCB attached, to follow one relay
+%                   drive from the Arduino through the base resistor and
+%                   transistor to the coil. Point it at D6, D7 or D8 in
+%                   turn: the three drives are identical circuits, so a
+%                   channel that works is the reference for one that does
+%                   not.
+%
+% Run the first five in that order. Each is independent.
 
 clear;
 clc;
@@ -62,11 +72,16 @@ clc;
 SERIAL_PORT = "COM4";       % must match your machine
 BOARD_TYPE  = "Uno";
 
-TEST = "spi_loopback";          % dmm_high | dmm_low | dmm_walk | loopback |
-                            % spi_loopback
+TEST = "one_pin";           % dmm_high | dmm_low | dmm_walk | loopback |
+                            % spi_loopback | one_pin
 
 WALK_DWELL = 2.0;           % seconds each pin stays HIGH in dmm_walk
 WALK_PASSES = 9;            % how many times dmm_walk goes round
+
+ONE_PIN        = "D7";      % pin driven by one_pin. the relay drives are
+                            % D6 = K1, D7 = K2, D8 = K3.
+ONE_PIN_PERIOD = 3.0;       % seconds in each state
+ONE_PIN_CYCLES = 20;        % HIGH/LOW pairs before it stops
 
 % Pins the PVLoad board uses, in header order.
 PINS = ["D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13"];
@@ -96,10 +111,12 @@ switch TEST
         runLoopback(a, LOOPBACK_PAIRS);
     case "spi_loopback"
         runSpiLoopback(a, SPI_CS);
+    case "one_pin"
+        drivePin(a, ONE_PIN, PINS, ROLES, ONE_PIN_PERIOD, ONE_PIN_CYCLES);
     otherwise
         error("test_arduino:BadTest", ...
-            "TEST must be dmm_high, dmm_low, dmm_walk, loopback or " + ...
-            "spi_loopback, not ""%s"".", TEST);
+            "TEST must be dmm_high, dmm_low, dmm_walk, loopback, " + ...
+            "spi_loopback or one_pin, not ""%s"".", TEST);
 end
 
 
@@ -138,6 +155,58 @@ function holdAllPins(a, pins, roles, level)
     else
         fprintf("The onboard LED next to pin 13 should be dark.\n");
     end
+end
+
+function drivePin(a, pin, pins, roles, period, cycles)
+% One pin, driven HIGH and LOW slowly enough to chase downstream with a
+% voltmeter. Toggling rather than holding, because a node that sits at the
+% right voltage is not the same as a node that follows the pin: a floating
+% probe point and a working one can read alike until something moves.
+%
+% Three points to follow, black lead on any ground:
+%
+%   the pin itself      ~5 V HIGH, ~0 V LOW. Anything else is the Arduino
+%                       or the wire to the header, not the board.
+%   transistor base     ~0.7 V HIGH, ~0 V LOW. Stuck at 0 V means the base
+%                       resistor or the header connection.
+%   transistor collector  ~0.2 V HIGH, ~5 V LOW. Note it runs backwards:
+%                       the transistor pulls the coil down when the pin is
+%                       HIGH. Stuck at 5 V means the transistor is not
+%                       switching. Following correctly while the relay
+%                       stays silent means the coil or the relay.
+%
+% Compare against a channel that works. K1 and K2 are the same circuit.
+
+    idx = find(pins == pin, 1);
+    if isempty(idx)
+        error("test_arduino:BadPin", ...
+            "ONE_PIN is ""%s"". This board brings out %s.", ...
+            pin, strjoin(pins, ", "));
+    end
+
+    fprintf("Driving %s, %s, for %d cycles at %g s per state.\n", ...
+        pin, roles(idx), cycles, period);
+    fprintf("Ctrl-C to stop early. The pin is left LOW either way.\n\n");
+
+    configurePin(a, pin, "DigitalOutput");
+
+    try
+        for k = 1:cycles
+            for level = [1 0]
+                writeDigitalPin(a, pin, level);
+                fprintf("  %2d/%2d  %s = %s\n", k, cycles, pin, ...
+                    logicalName(level));
+                drawnow;
+                pause(period);
+            end
+        end
+    catch stopped
+        writeDigitalPin(a, pin, 0);
+        rethrow(stopped);
+    end
+
+    writeDigitalPin(a, pin, 0);
+    fprintf("\nDone. %s left LOW.\n", pin);
 end
 
 function walkPins(a, pins, roles, dwell, passes)

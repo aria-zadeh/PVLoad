@@ -26,7 +26,7 @@ writes the results to CSV.
 |---|---|
 | Device under test | PV cell, up to ~9 V open circuit, ~16 mA short circuit |
 | Load range, both pots in circuit | ~400 Ω to 10 kΩ |
-| Load range, DigiPot 2 bypassed | ~200 Ω to 5 kΩ |
+| Load range, DigiPot 2 bypassed | ~155 Ω to 5.2 kΩ |
 | Step resolution | ~19.6 Ω per code (5000 Ω / 255) |
 | Short circuit path | Relay contact, 0.150 Ω max |
 | Open circuit path | 470 kΩ, ~19 µA at 9 V |
@@ -67,8 +67,8 @@ P0A is left unconnected on both chips.
 | Mode | D6 (K1) | D7 (K2) | D8 (K3) | Load seen by the cell |
 |---|---|---|---|---|
 | `SHORT` | HIGH | HIGH | LOW | Near zero ohms. Yields Isc. |
-| `LOW` | HIGH | LOW | HIGH | DigiPot 2 shorted. ~200 Ω to ~5 kΩ. |
-| `FULL` | HIGH | LOW | LOW | Both pots in series, 470 kΩ shorted. ~400 Ω to ~10 kΩ. |
+| `LOW` | HIGH | LOW | HIGH | DigiPot 2 shorted. ~155 Ω to ~5.2 kΩ. |
+| `FULL` | HIGH | LOW | LOW | Both pots in series, 470 kΩ shorted. ~310 Ω to ~10.3 kΩ. |
 | `OPEN` | LOW | LOW | LOW | 470 kΩ in series. Yields Voc. |
 
 K3 is a don't-care in `SHORT` because K2 already bypasses everything downstream of PV+. Drive it LOW
@@ -147,7 +147,8 @@ code 0. The denominator is 255 because an 8-bit ladder has 255 physical step res
 tap points.
 
 **Do not compute resistance from the tap code in analysis.** R_AB tolerance is ±20% and wiper
-resistance at a 24 V span is not characterized (treat 200 Ω per device as a worst case bound).
+resistance at a 24 V span is not characterized by the datasheet. Measured at 155 Ω per device on
+the assembled board.
 The code is a repeatable setting, not a known resistance. Always work from measured V and I.
 
 ---
@@ -375,8 +376,8 @@ Both chips are wired identically except for chip select.
 
 ## 11. Known limitations affecting software
 
-1. Wiper resistance at a 24 V span is not characterized in the datasheet. The 200 Ω per device
-   figure is a worst case bound, not a measured value. Measure it on the assembled board and
+1. Wiper resistance at a 24 V span is not characterized in the datasheet. The 155 Ω per device
+   figure is measured on the assembled board rather than taken from a spec. Re-measure it and
    replace the estimate.
 2. No on-board sensing means the measured columns of any log come from an operator or an
    instrument that the control script does not own. Design the logger to accept them after the

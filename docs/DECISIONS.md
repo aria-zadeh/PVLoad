@@ -15,12 +15,14 @@ combined code 0 to 510 and splits it across the chips, giving one wiper step
 
 ## Keep both ladders
 
-`LOW` (K3 closed, one pot) starts near 200 ohm. `FULL` (both pots) starts near
-400 ohm. Both climb in ~19.6 ohm steps.
+`LOW` (K3 closed, one pot) starts at one wiper resistance, measured at 155 ohm.
+`FULL` (both pots) starts at two. Both climb in ~19.6 ohm steps.
 
-200 / 19.6 = 10.2, so the ladders do not align. The `FULL` rungs fall between the
+155 / 19.6 = 7.9, so the ladders do not align. The `FULL` rungs fall between the
 `LOW` rungs, and 245 `FULL` points land inside the `LOW` range at resistances
-neither ladder reaches alone.
+neither ladder reaches alone. The margin is not large: the closest rungs sit
+about 2 ohm apart, so a wiper resistance nearer a whole number of steps would
+cost most of the benefit.
 
 An earlier version deleted that overlap as redundant. The offset depends on wiper
 resistance, which the datasheet does not characterise at a 24 V span, so the
@@ -177,9 +179,9 @@ debug once two TSSOP packages are soldered down.
 
 ## Open questions
 
-- Wiper resistance at a 24 V span is not characterised. 200 ohm is a worst-case
-  bound. Measure it on the assembled board and update `R_WIPER`. It affects sweep
-  ordering only.
+- Wiper resistance measured 155 ohm per device on board 2, with the two chips
+  agreeing to 1%. `R_WIPER` carries that now. The datasheet does not specify the
+  part at a 24 V span; its quoted range is 75 ohm typical to 200 ohm maximum.
 - The 200 ohm gap between `SHORT` (0.150 ohm) and the lowest pot setting is a
   hardware floor. No relay or code combination reaches inside it.
 - `EDFA_LEVEL_SETTLE` is an estimate at 10 s. It represents the cell reaching

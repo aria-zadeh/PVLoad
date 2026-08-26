@@ -15,11 +15,13 @@ clc;
 %   "wiper"   board only, the pairs of states whose difference is one
 %             wiper resistance and nothing else
 %   "k3"      board only, four holds that say whether K3 closes
+%   "verify"  board only, seven holds that between them exercise every
+%             part of the board. the check for a freshly built one.
 %   "edfa"    amplifier only
 %   "meters"  electrometers only
 %   "sweep"   the full experiment, written to CSV
 
-RUN = "k3";  
+RUN = "verify";  
 
 
 % to find com ports: serialportlist("available")
@@ -145,9 +147,10 @@ VERIFY_WIPER  = true;      % read each wiper register back after writing
 
 R_AB_NOMINAL = 5000;       % ohms, one MCP41HV51-502 end to end
 WIPER_STEPS  = 255;        % 8-bit ladder has 255 step resistors
-R_WIPER      = 200;        % ohms, datasheet worst case, not a measurement.
-                           % uncharacterised at 24 V. measure it and
-                           % replace; affects ordering and labels only.
+R_WIPER      = 155;        % ohms per device, measured on board 2 with
+                           % RUN "verify" at a 24 V span. the two chips
+                           % agreed to 1%. docs/BRINGUP.md has the numbers.
+                           % affects ordering and labels only.
 R_CONTACT    = 0.150;      % ohms, reed contact resistance, maximum
 R_OPEN_PATH  = 470e3;      % ohms, R1
 
@@ -332,6 +335,7 @@ switch cfg.Run
     case "ramp",   runRamp(cfg);
     case "wiper",  runWiperCheck(cfg);
     case "k3",     runK3Check(cfg);
+    case "verify", runVerify(cfg);
     case "edfa",   runEdfaCheck(cfg);
     case "meters", runMeterCheck(cfg);
     case "sweep",  results = runSweepAll(cfg);
@@ -503,6 +507,68 @@ function runWiperCheck(cfg)
     fprintf("U2 wiper is each FULL row minus the LOW row above it, and " + ...
             "should be\nthe same number every time.\n");
     fprintf("Returned to OPEN.\n");
+end
+
+function runVerify(cfg)
+% Board only, for deciding whether a freshly assembled board is sound.
+% Seven holds that between them touch both chips over SPI, all three
+% relays, both ladders and R1. Nothing else on the board is load bearing.
+%
+% The pass conditions are comparisons rather than absolute numbers. A
+% handheld carries its leads, its clips and both jacks in every reading,
+% which is tens of ohms and drifts, and every check below is a difference
+% or an order of magnitude, so none of them notice.
+%
+% Two holds are written straight to the pots rather than taken from the
+% plan. LOW always carries a zero second code in a sweep, so no planned
+% state drives U2 while K3 is meant to be shorting it out, which is
+% exactly the case that catches a relay that never operates.
+
+    board = connectBoard(cfg);
+    guard = onCleanup(@() quietly(@() enterSafeState(board)));
+
+    fprintf("Board connected on %s.\n", cfg.SerialPort);
+    enterSafeState(board);
+    selfTestPotentiometers(board);
+
+    holds = [ ...
+        verifyHold("OPEN",  0,   0,   "R1, and K1 releasing")
+        verifyHold("SHORT", 0,   0,   "K2 closing")
+        verifyHold("FULL",  0,   0,   "K1 closing, and both wipers")
+        verifyHold("FULL",  255, 0,   "U1 ladder")
+        verifyHold("FULL",  255, 255, "U2 ladder")
+        verifyHold("LOW",   0,   0,   "K3 closing")
+        verifyHold("LOW",   0,   255, "K3 closing, proved")];
+
+    fprintf("\n%d holds, %g s each. Meter in ohms on J1 and J3, no cell.\n", ...
+        numel(holds), cfg.RampDwell);
+    fprintf("Write all seven down.\n\n");
+
+    for k = 1:numel(holds)
+        h = holds(k);
+        fprintf("  %d  %-5s  U1=%3d  U2=%3d    %s\n", ...
+            k, h.Mode, h.Code1, h.Code2, h.Proves);
+        drawnow;
+        setMode(board, h.Mode);
+        setWipers(board, h.Code1, h.Code2);
+        pause(cfg.RampDwell);
+    end
+
+    enterSafeState(board);
+    clear guard;
+
+    fprintf("\nPass conditions:\n");
+    fprintf("  1        about 470 kohm.\n");
+    fprintf("  2        the lowest reading of the seven, and by far.\n");
+    fprintf("  4 - 3    about 5 kohm. That is U1's ladder.\n");
+    fprintf("  5 - 4    about 5 kohm. That is U2's ladder.\n");
+    fprintf("  6        below 3, because K3 takes U2 out of the path.\n");
+    fprintf("  7 = 6    to the ohm. A 5 kohm jump means K3 never closes.\n");
+    fprintf("\nThe self-test above covers SPI and both chips.\n");
+end
+
+function h = verifyHold(mode, code1, code2, proves)
+    h = struct('Mode', mode, 'Code1', code1, 'Code2', code2, 'Proves', proves);
 end
 
 function runK3Check(cfg)
@@ -725,7 +791,8 @@ function assertConfig(cfg)
 % Catches a mistyped config block before anything is energised.
 
     mustBeOneOf(cfg.Run, ...
-        ["plan" "board" "ramp" "wiper" "k3" "edfa" "meters" "sweep"], "RUN");
+        ["plan" "board" "ramp" "wiper" "k3" "verify" "edfa" "meters" ...
+         "sweep"], "RUN");
 
     if cfg.RampSteps < 2 || cfg.RampSteps > 769
         error("PVLoad:BadRampSteps", ...
