@@ -3,37 +3,37 @@
   Source for docs/PVLoad_BenchCard.pdf. Regenerate with:
     chrome --headless --disable-gpu --no-pdf-header-footer \
       --print-to-pdf=docs/PVLoad_BenchCard.pdf docs/benchcard.html
-  Edge works too. One page. Keep it that way.
+  Edge works too. One page, plain instructions, no rules, no dashes.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>PVLoad-R1 Bench Card</title>
 <style>
-  @page { size: A4; margin: 11mm 12mm; }
+  @page { size: A4; margin: 10mm 11mm; }
   * { box-sizing: border-box; }
-  body { font: 8.6pt/1.32 "Segoe UI", Arial, sans-serif; color: #000; margin: 0; }
-  h1 { font-size: 14pt; margin: 0 0 8px; }
+  body { font: 8.1pt/1.3 "Segoe UI", Arial, sans-serif; color: #111; margin: 0; }
+  h1 { font-size: 13pt; margin: 0 0 7px; letter-spacing: -0.2px; }
   h2 {
-    font-size: 8.8pt; margin: 0 0 4px; padding-bottom: 2px;
-    border-bottom: 1.2px solid #000; text-transform: uppercase; letter-spacing: 0.5px;
+    font-size: 8pt; margin: 0 0 4px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.7px; color: #000;
   }
-  section { margin-bottom: 11px; break-inside: avoid; }
-  p { margin: 0 0 5px; }
-  table { border-collapse: collapse; width: 100%; font-size: 8.4pt; }
-  td { border: 0.6px solid #aaa; padding: 1.6px 5px; }
-  td.n { text-align: center; width: 26px; color: #555; }
-  td.a { width: 44px; font-family: Consolas, monospace; }
+  section { margin-bottom: 9px; break-inside: avoid; }
+  p { margin: 0 0 3px; }
+  table { border-collapse: collapse; margin: 0 0 4px; font-size: 8pt; }
+  td { padding: 1px 14px 1px 0; border: none; }
+  td.n { color: #777; width: 22px; }
+  td.a { font-family: Consolas, monospace; width: 42px; }
   .mono { font-family: Consolas, "Courier New", monospace; }
-  ol { margin: 0; padding-left: 16px; }
+  ol { margin: 0; padding-left: 17px; }
   li { margin-bottom: 1px; }
-  .cols { column-count: 2; column-gap: 9mm; }
+  .cols { column-count: 2; column-gap: 10mm; }
   .wire {
-    font-family: Consolas, monospace; font-size: 8.4pt;
-    background: #f2f2f2; padding: 3px 6px; margin: 3px 0 5px;
+    font-family: Consolas, monospace; font-size: 7.9pt;
+    background: #f0f0f0; padding: 4px 7px; margin: 3px 0 4px;
   }
-  .box { border: 1.1px solid #000; padding: 5px 7px; }
-  b.lbl { display: block; margin-top: 4px; }
+  .flag { background: #ececec; padding: 5px 7px; }
+  .gap { margin-top: 5px; }
 </style>
 </head>
 <body>
@@ -43,7 +43,8 @@
 <div class="cols">
 
 <section>
-<h2>Arduino &rarr; 1&times;10 header</h2>
+<h2>Wiring the Arduino</h2>
+<p>Ten wires from the Arduino to the 10-pin header on the board. Pin 1 is the square pad.</p>
 <table>
 <tr><td class="n">1</td><td class="a">5V</td><td>5 V</td></tr>
 <tr><td class="n">2</td><td class="a">GND</td><td>GND</td></tr>
@@ -56,15 +57,16 @@
 <tr><td class="n">9</td><td class="a">D12</td><td>SDO</td></tr>
 <tr><td class="n">10</td><td class="a">D13</td><td>SCK</td></tr>
 </table>
-<p style="margin-top:4px">Header pin 1 is the square pad. On the Uno, <span class="mono">5V</span> and
-<span class="mono">GND</span> are on the power header; <span class="mono">D8</span>&ndash;<span class="mono">D13</span>
-sit nearest the USB socket.</p>
+<p>On the Uno, <span class="mono">5V</span> and <span class="mono">GND</span> are on the power side.
+<span class="mono">D8</span> to <span class="mono">D13</span> are the six pins nearest the USB socket.</p>
 </section>
 
 <section>
-<h2>Banana jacks</h2>
-<p><b>J1</b> red is PV+. <b>J2</b> red is +24 V. <b>J3</b> black is ground, shared by the supply
-return and the cell negative &mdash; use a stacking plug so nothing is jammed alongside anything else.</p>
+<h2>The three banana jacks</h2>
+<p><b>J1</b>, red. PV+, the cell's positive.</p>
+<p><b>J2</b>, red. +24 V from the bench supply.</p>
+<p><b>J3</b>, black. Ground. The supply's negative and the cell's negative both go here. Use a
+stacking plug so they are not jammed in together.</p>
 </section>
 
 <section>
@@ -87,67 +89,93 @@ return and the cell negative &mdash; use a stacking plug so nothing is jammed al
 <li>Arduino out &nbsp;(5 V off)</li>
 <li>24 V off</li>
 </ol>
-<p style="margin-top:5px"><b>Nothing gets unplugged to switch a rail.</b> The two supply leads stay
-in J2 and J3, and the ten header wires stay between the Arduino and the board.</p>
-<p><b>24 V on / off</b> is the output switch on the supply. If yours has no output switch, seat the
-black lead in J3 first and treat the red going into J2 as the on step.</p>
-<p><b>5 V on / off</b> is the USB cable <b>at the laptop end</b>. Pull it there and leave the Arduino
-and its header wiring alone. Stop the script before you pull it.</p>
 </section>
 
 <section>
-<h2>Cables</h2>
-<p><b>Arduino.</b> USB-A to USB-B, straight to the laptop.</p>
-<p><b>24 V supply.</b> Two banana leads to J2 and J3. Set 24.0 V, current limit about 100 mA.</p>
-<p><b>EDFA100P.</b> Plain USB cable, no adapter.</p>
-<p><b>The two 617s.</b> They have an IEEE-488 socket and nothing else, so you need a USB-GPIB adapter
-&mdash; National Instruments, to match the VISA on the laptop. One adapter carries both: run a cable
-from the adapter to the first meter, then a second cable from the first meter to the second, because
-the connectors stack.</p>
-<p>Set a <b>different address on each meter</b> from its front panel before connecting them. Both ship
-on 27 and will collide. Use 22 for the volts meter and 23 for the amps meter.</p>
+<h2>What on and off mean</h2>
+<p>You never unplug anything from the board to switch a rail. The supply leads stay in J2 and J3.
+The ten header wires stay on the Arduino.</p>
+<p class="gap"><b>24 V on and off</b> is the output button on the bench supply. If yours has no output
+button, put the black lead in J3 first, and pushing the red into J2 is the on step.</p>
+<p><b>5 V on and off</b> is the USB cable, pulled out at the laptop end. Stop the script before you
+pull it.</p>
 </section>
 
 <section>
-<h2>Putting the two 617s in the circuit</h2>
-<p>Each 617's <span class="mono">INPUT</span> is a triaxial socket, so you cannot clip a banana lead
-straight on. Screw a <b>triax-to-dual-banana adapter</b> onto it. That gives you two banana posts,
-<b>HI</b> and <b>LO</b>.</p>
-
-<b class="lbl">Amps meter &mdash; goes inside the wire</b>
-<p>Current can only be measured by making it flow through the meter, so you cut the PV+ line and put
-the meter in the gap. The wire that used to run from the cell straight to J1 now runs through the
-meter instead:</p>
-<div class="wire">cell + &nbsp;&rarr;&nbsp; HI post<br>LO post &nbsp;&rarr;&nbsp; J1</div>
-
-<b class="lbl">Volts meter &mdash; sits across the cell</b>
-<p>Nothing is cut. Two leads simply touch the cell's own two terminals:</p>
-<div class="wire">HI post &nbsp;&rarr;&nbsp; cell +<br>LO post &nbsp;&rarr;&nbsp; cell &minus;</div>
-<p>Put these on the <b>cell leads themselves</b>, not on J1 and J3. On J1 you would be reading through
-the amps meter as well, which makes the voltage read low.</p>
+<h2>Using the handheld meter</h2>
+<p>Black lead into the socket marked <b>COM</b>. Red lead into the socket marked <b>V&#8486;</b>.
+Never the <b>10A</b> socket: in that one the meter is a plain piece of wire and you would be shorting
+J1 to J3.</p>
+<p>Turn the dial to <b>ohms</b> (&#8486;) to read the board's resistance across J1 and J3. Turn it to
+<b>DC volts</b> (V with a straight line over dashes) to probe pins against ground.</p>
 </section>
 
 <section>
-<h2>The EDFA interlock</h2>
-<p>Small connector on the back of the amplifier. It is a laser safety cutout: the amplifier only emits
-while that circuit is closed, the idea being that you wire it to a door switch so opening the door
-kills the beam. <b>Plug in the shorting plug it shipped with.</b> With nothing in it the laser will not
-turn on at all, no matter what the software asks for.</p>
+<h2>Cables to the laptop</h2>
+<p><b>Arduino.</b> Normal USB printer cable, A to B.</p>
+<p><b>EDFA100P laser.</b> Normal USB cable. Nothing special.</p>
+<p><b>Bench supply.</b> Two banana leads to J2 and J3. Set 24.0 V with a current limit of about
+100 mA.</p>
+<p class="gap"><b>The two Keithley 617 meters.</b> These have no USB. They only have a GPIB socket,
+the wide connector with two screws. You need one USB to GPIB adapter, National Instruments brand.
+Plug the adapter into the laptop and run a GPIB cable to the first meter. GPIB connectors stack on
+top of each other, so a second GPIB cable goes from the first meter to the second. Both meters share
+the one adapter.</p>
+<p>Before connecting them, give each meter a different address from its front panel. They both arrive
+set to 27, which does not work with two on the same cable. Set the volts meter to <b>22</b> and the
+amps meter to <b>23</b>.</p>
 </section>
 
 <section>
-<div class="box">
-<b>LASER &mdash; Class 3B, 1550 nm, invisible.</b> It emits up to 30 mW whenever it is enabled, even at
-zero pump current and with no optical input. Terminate the output before running. Never look into the
-fibre bulkhead.
+<h2>Connecting the 617 meters to the cell</h2>
+<p>The front socket marked <span class="mono">INPUT</span> is triaxial, so a banana plug will not fit.
+Screw on a triax to dual banana adapter. You now have two ordinary banana posts, <b>HI</b> and
+<b>LO</b>.</p>
+
+<p class="gap"><b>The amps meter goes inside the wire.</b> Current has to flow through it, so cut the
+wire running from the cell's + terminal to J1 and put the meter in the break.</p>
+<div class="wire">cell +&nbsp;&nbsp; &rarr;&nbsp; HI post<br>LO post&nbsp; &rarr;&nbsp; J1</div>
+
+<p><b>The volts meter goes across the cell.</b> Nothing is cut. Two leads just touch the cell's
+terminals.</p>
+<div class="wire">HI post&nbsp; &rarr;&nbsp; cell +<br>LO post&nbsp; &rarr;&nbsp; cell &minus;</div>
+<p>Clip these onto the cell's own leads, not onto J1 and J3. On the jacks you would be measuring
+through the amps meter as well and the reading comes out low.</p>
+</section>
+
+<section>
+<h2>Using the 617 meters</h2>
+<p>Power switch is on the front.</p>
+<p>On power up the meter sits in Volts with <b>ZERO CHECK</b> engaged. While ZERO CHECK is on it reads
+zero whatever is connected to it. Press the ZERO CHECK button to release it before measuring by hand.
+The script does this itself when it is driving the meter.</p>
+<p>The function buttons pick V, A, ohms or coulombs. The script sets these too.</p>
+<p class="gap"><b>To set the GPIB address:</b> press SELECT repeatedly until IEEE appears, set the
+number with the ADJUST arrows, then press SHIFT followed by SELECT to store and exit.</p>
+<p><b>REMOTE</b> lights up while the laptop is driving the meter. Press LOCAL to take manual control
+back.</p>
+</section>
+
+<section>
+<h2>The laser interlock</h2>
+<p>Small connector on the back of the amplifier. It is a safety cutout, meant to be wired to a door
+switch so the laser dies when the door opens. Plug in the small shorting plug that came with the unit.
+Left empty, the laser will not fire at all.</p>
+</section>
+
+<section>
+<div class="flag">
+<b>LASER SAFETY.</b> Class 3B, 1550 nm. You cannot see it. It puts out up to 30 mW any time it is
+enabled, at any pump current, even with nothing going into it. Terminate the output. Never look into
+the fibre.
 </div>
 </section>
 
 <section>
-<div class="box">
-<b>WHY THE POWER ORDER MATTERS.</b> With 5 V up, K1 closed and 24 V missing, K1 shorts out R1 and the
-cell drives straight into the DigiPot's input clamp at 80% of its absolute maximum. That is what kills
-a chip. The cell goes on last and comes off first for that reason.
+<div class="flag">
+<b>DO NOT.</b> Never have the cell connected and lit while the 24 V is off. With 5 V up and 24 V
+missing, the cell's current goes straight into the chip and destroys it. That is why the cell goes on
+last and comes off first.
 </div>
 </section>
 
