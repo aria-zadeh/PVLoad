@@ -1,444 +1,150 @@
 <!doctype html>
 <!--
   Source for docs/PVLoad_BenchCard.pdf. Regenerate with:
-    chrome --headless --disable-gpu --no-pdf-header-footer \n      --print-to-pdf=docs/PVLoad_BenchCard.pdf docs/benchcard.html
-  Edge works too. Keep the two in step.
+    chrome --headless --disable-gpu --no-pdf-header-footer \
+      --print-to-pdf=docs/PVLoad_BenchCard.pdf docs/benchcard.html
+  Edge works too. One page. Keep it that way.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>PVLoad-R1 Bench Card</title>
 <style>
-  @page { size: A4; margin: 14mm 14mm 12mm 14mm; }
+  @page { size: A4; margin: 11mm 12mm; }
   * { box-sizing: border-box; }
-  body {
-    font: 10.5pt/1.45 "Segoe UI", Arial, sans-serif;
-    color: #000; background: #fff; margin: 0;
-  }
-  h1 { font-size: 17pt; margin: 0 0 2px; letter-spacing: -0.2px; }
-  h1 + .sub { font-size: 9pt; color: #444; margin: 0 0 14px; }
+  body { font: 8.6pt/1.32 "Segoe UI", Arial, sans-serif; color: #000; margin: 0; }
+  h1 { font-size: 14pt; margin: 0 0 8px; }
   h2 {
-    font-size: 12pt; margin: 20px 0 7px; padding-bottom: 3px;
-    border-bottom: 1.5px solid #000;
+    font-size: 8.8pt; margin: 0 0 4px; padding-bottom: 2px;
+    border-bottom: 1.2px solid #000; text-transform: uppercase; letter-spacing: 0.5px;
   }
-  h3 { font-size: 10.5pt; margin: 14px 0 5px; }
-  p { margin: 0 0 8px; }
-  table { border-collapse: collapse; width: 100%; margin: 0 0 10px; font-size: 9.5pt; }
-  th, td { border: 0.75px solid #999; padding: 3.5px 6px; text-align: left; vertical-align: top; }
-  th { background: #eee; font-weight: 600; }
-  td.n, th.n { text-align: center; width: 46px; }
-  code, .mono { font-family: Consolas, "Courier New", monospace; font-size: 9.5pt; }
-  .warn {
-    border: 1.5px solid #000; padding: 7px 10px; margin: 10px 0;
-    background: #f4f4f4; font-size: 9.5pt;
+  section { margin-bottom: 11px; break-inside: avoid; }
+  p { margin: 0 0 5px; }
+  table { border-collapse: collapse; width: 100%; font-size: 8.4pt; }
+  td { border: 0.6px solid #aaa; padding: 1.6px 5px; }
+  td.n { text-align: center; width: 26px; color: #555; }
+  td.a { width: 44px; font-family: Consolas, monospace; }
+  .mono { font-family: Consolas, "Courier New", monospace; }
+  ol { margin: 0; padding-left: 16px; }
+  li { margin-bottom: 1px; }
+  .cols { column-count: 2; column-gap: 9mm; }
+  .wire {
+    font-family: Consolas, monospace; font-size: 8.4pt;
+    background: #f2f2f2; padding: 3px 6px; margin: 3px 0 5px;
   }
-  .warn b { text-transform: uppercase; letter-spacing: 0.4px; font-size: 9pt; }
-  ol, ul { margin: 0 0 10px; padding-left: 20px; }
-  li { margin-bottom: 3px; }
-  .page { page-break-after: always; }
-  .page:last-child { page-break-after: auto; }
-  .two { display: flex; gap: 16px; }
-  .two > div { flex: 1; }
-  svg { width: 100%; height: auto; display: block; }
-  .cap { font-size: 8.5pt; color: #444; margin: 2px 0 12px; }
-  .note { font-size: 9pt; color: #333; }
-  text { font-family: "Segoe UI", Arial, sans-serif; }
+  .box { border: 1.1px solid #000; padding: 5px 7px; }
+  b.lbl { display: block; margin-top: 4px; }
 </style>
 </head>
 <body>
 
-<!-- ================= PAGE 1 ================= -->
-<div class="page">
 <h1>PVLoad-R1 Bench Card</h1>
-<p class="sub">Programmable resistive load for PV I&#8211;V characterisation &middot; connections, power order, wiring</p>
 
-<h2>1 &nbsp; Arduino Uno &rarr; board 1&times;10 header</h2>
+<div class="cols">
+
+<section>
+<h2>Arduino &rarr; 1&times;10 header</h2>
 <table>
-<tr><th class="n">Pin</th><th>Arduino</th><th>Function</th></tr>
-<tr><td class="n">1</td><td class="mono">5V</td><td>Logic supply and relay coil supply (~30 mA total)</td></tr>
-<tr><td class="n">2</td><td class="mono">GND</td><td>Common reference</td></tr>
-<tr><td class="n">3</td><td class="mono">D6</td><td>K1 drive &mdash; bypasses R1 (470 k&#8486;)</td></tr>
-<tr><td class="n">4</td><td class="mono">D7</td><td>K2 drive &mdash; SHORT, bypasses the whole load</td></tr>
-<tr><td class="n">5</td><td class="mono">D8</td><td>K3 drive &mdash; bypasses DigiPot U2</td></tr>
-<tr><td class="n">6</td><td class="mono">D9</td><td>U2 chip select (CS#)</td></tr>
-<tr><td class="n">7</td><td class="mono">D10</td><td>U1 chip select (CS#)</td></tr>
-<tr><td class="n">8</td><td class="mono">D11</td><td>SPI MOSI &rarr; SDI on both chips</td></tr>
-<tr><td class="n">9</td><td class="mono">D12</td><td>SPI MISO &larr; SDO on both chips</td></tr>
-<tr><td class="n">10</td><td class="mono">D13</td><td>SPI SCK &rarr; both chips</td></tr>
+<tr><td class="n">1</td><td class="a">5V</td><td>5 V</td></tr>
+<tr><td class="n">2</td><td class="a">GND</td><td>GND</td></tr>
+<tr><td class="n">3</td><td class="a">D6</td><td>K1 drive</td></tr>
+<tr><td class="n">4</td><td class="a">D7</td><td>K2 drive</td></tr>
+<tr><td class="n">5</td><td class="a">D8</td><td>K3 drive</td></tr>
+<tr><td class="n">6</td><td class="a">D9</td><td>CS U2</td></tr>
+<tr><td class="n">7</td><td class="a">D10</td><td>CS U1</td></tr>
+<tr><td class="n">8</td><td class="a">D11</td><td>SDI</td></tr>
+<tr><td class="n">9</td><td class="a">D12</td><td>SDO</td></tr>
+<tr><td class="n">10</td><td class="a">D13</td><td>SCK</td></tr>
 </table>
-<p class="note">Header pin 1 is the square pad on the silkscreen. Order down the header is
-<span class="mono">5V, GND, D6, D7, D8, D9, D10, D11, D12, D13</span>. On the Uno, <span class="mono">5V</span> and
+<p style="margin-top:4px">Header pin 1 is the square pad. On the Uno, <span class="mono">5V</span> and
 <span class="mono">GND</span> are on the power header; <span class="mono">D8</span>&ndash;<span class="mono">D13</span>
-are in the digital group nearest the USB socket, <span class="mono">D6</span> and <span class="mono">D7</span> in the other group.</p>
+sit nearest the USB socket.</p>
+</section>
 
-<h2>2 &nbsp; Banana jacks</h2>
-<table>
-<tr><th class="n">Jack</th><th>Colour</th><th>Connect to</th></tr>
-<tr><td class="n">J1</td><td>Red</td><td>PV+ &mdash; cell positive (or the handheld's V&#8486; lead during bring-up)</td></tr>
-<tr><td class="n">J2</td><td>Red</td><td>+24 V from the bench supply</td></tr>
-<tr><td class="n">J3</td><td>Black</td><td>GND &mdash; supply return <em>and</em> cell negative. Shared.</td></tr>
-</table>
-<p class="note">J3 carries two or three things at once. Use a stacking banana plug; a jack with leads
-jammed alongside each other reads tens of ohms and drifts.</p>
+<section>
+<h2>Banana jacks</h2>
+<p><b>J1</b> red is PV+. <b>J2</b> red is +24 V. <b>J3</b> black is ground, shared by the supply
+return and the cell negative &mdash; use a stacking plug so nothing is jammed alongside anything else.</p>
+</section>
 
-<h2>3 &nbsp; Instrument cables</h2>
-<table>
-<tr><th style="width:26%">Instrument</th><th>Cable, and what has to be set on the instrument itself</th></tr>
-<tr>
-  <td><b>Arduino Uno</b></td>
-  <td>USB-A to USB-B (printer cable), straight to the laptop. Nothing to set.</td>
-</tr>
-<tr>
-  <td><b>Keithley 617</b><br>&times;2</td>
-  <td><b>IEEE-488 (GPIB) only &mdash; no USB, no serial port.</b> Each needs a
-      <b>USB-GPIB adapter</b>, matched to the VISA installed on the laptop, which is National
-      Instruments. One adapter serves both meters: IEEE-488 connectors stack, so run a cable from the
-      adapter to the first meter and a second cable from the first meter to the second.
-      <br><br>
-      <b>Set a different primary address on each meter</b> from its front panel before connecting
-      them. They all ship at 27, so two on one bus will collide. Use <b>22 for the volts meter</b> and
-      <b>23 for the amps meter</b>.</td>
-</tr>
-<tr>
-  <td><b>617 inputs</b></td>
-  <td>Front-panel triaxial <span class="mono">INPUT</span>, through a triax-to-dual-banana adapter.
-      HI is the centre conductor, LO the inner shield.</td>
-</tr>
-<tr>
-  <td><b>Thorlabs<br>EDFA100P</b></td>
-  <td>Plain USB cable &mdash; no adapter. It enumerates as a virtual COM port.
-      <br><br>
-      <b>The rear interlock must be shorted</b> or the amplifier will not enable.</td>
-</tr>
-<tr>
-  <td><b>24 V supply</b></td>
-  <td>Two banana leads to J2 and J3. Set 24.0 V and a current limit of about 100 mA.</td>
-</tr>
-</table>
-<p class="note">Every port and address above has a matching setting at the top of
-<span class="mono">PVLoad_Main.m</span>, described in the comments there.</p>
-</div>
-
-<!-- ================= PAGE 2 ================= -->
-<div class="page">
-<h1>Power sequence</h1>
-<p class="sub">Applies to every configuration. The cell and the 24 V supply are both sources.</p>
-
-<div class="warn">
-<b>The one rule</b><br>
-24 V goes on <b>first</b> and off <b>last</b>. The cell goes on <b>last</b> and off <b>first</b>.<br>
-The Arduino's 5 V pin <em>is</em> the board's 5 V rail &mdash; plugging in the Arduino is switching on 5 V.
-</div>
-
+<section>
 <h2>Power up</h2>
-<table>
-<tr><th class="n">#</th><th style="width:32%">Action</th><th>Notes</th></tr>
-<tr><td class="n">1</td><td>Seat both supply leads with the output <b>off</b></td><td>Black to J3 first, then red to J2. No live plugging.</td></tr>
-<tr><td class="n">2</td><td><b>24 V supply output ON</b></td><td>Set 24.0 V, current limit ~100 mA. The board draws almost nothing here; the limit is a tripwire.</td></tr>
-<tr><td class="n">3</td><td><b>Arduino USB in</b> &mdash; this is &ldquo;5 V on&rdquo;</td><td>USB alone is enough for ~30 mA of coils. The 9 V barrel jack is optional.</td></tr>
-<tr><td class="n">4</td><td>Power on both 617 electrometers</td><td>Any time before the script. Allow them to warm up.</td></tr>
-<tr><td class="n">5</td><td>Power on the EDFA100P</td><td>Interlock shorted. Output terminated or already aimed at the cell.</td></tr>
-<tr><td class="n">6</td><td><b>Connect the cell, dark</b></td><td>PV&minus; to J3 first, then PV+ to J1. Nothing running: the board sits in <span class="mono">OPEN</span> by default, which keeps R1 in circuit.</td></tr>
-<tr><td class="n">7</td><td><b>Start the script</b></td><td>It enables the pump itself and illuminates the cell.</td></tr>
-</table>
+<ol>
+<li>24 V on</li>
+<li>5 V on &nbsp;(plug in the Arduino)</li>
+<li>PV&minus; &rarr; J3</li>
+<li>PV+ &rarr; J1</li>
+<li>illuminate the cell</li>
+</ol>
+</section>
 
+<section>
 <h2>Power down</h2>
-<table>
-<tr><th class="n">#</th><th style="width:32%">Action</th><th>Notes</th></tr>
-<tr><td class="n">1</td><td>Let the script finish, or Ctrl-C</td><td>The abort path kills the pump first, before anything else.</td></tr>
-<tr><td class="n">2</td><td><b>Confirm the pump is off</b></td><td>Check the EDFA front-panel ENABLE indicator before approaching the output.</td></tr>
-<tr><td class="n">3</td><td><b>Disconnect the cell</b></td><td>Darken it, then PV+ out of J1, then PV&minus; out of J3.</td></tr>
-<tr><td class="n">4</td><td><b>Arduino USB out</b> &mdash; 5 V off</td><td></td></tr>
-<tr><td class="n">5</td><td><b>24 V supply output OFF</b></td><td>Then red out of J2, then black out of J3 if unplugging at all.</td></tr>
-<tr><td class="n">6</td><td>EDFA and 617s off</td><td>Any order.</td></tr>
-</table>
+<ol>
+<li>darken the cell</li>
+<li>PV+ out of J1</li>
+<li>PV&minus; out of J3</li>
+<li>Arduino out &nbsp;(5 V off)</li>
+<li>24 V off</li>
+</ol>
+</section>
 
-<div class="warn">
-<b>Why the order matters</b><br>
-With 5 V up, K1 energised and 24 V absent, K1 shorts out R1 and the cell drives straight into the
-DigiPot's input clamp &mdash; about 80% of its &plusmn;20 mA absolute maximum. That is the case that
-destroys a chip. D4 sits between the two rails and does <em>not</em> protect the PV input path.
+<section>
+<h2>Cables</h2>
+<p><b>Arduino.</b> USB-A to USB-B, straight to the laptop.</p>
+<p><b>24 V supply.</b> Two banana leads to J2 and J3. Set 24.0 V, current limit about 100 mA.</p>
+<p><b>EDFA100P.</b> Plain USB cable, no adapter.</p>
+<p><b>The two 617s.</b> They have an IEEE-488 socket and nothing else, so you need a USB-GPIB adapter
+&mdash; National Instruments, to match the VISA on the laptop. One adapter carries both: run a cable
+from the adapter to the first meter, then a second cable from the first meter to the second, because
+the connectors stack.</p>
+<p>Set a <b>different address on each meter</b> from its front panel before connecting them. Both ship
+on 27 and will collide. Use 22 for the volts meter and 23 for the amps meter.</p>
+</section>
+
+<section>
+<h2>Putting the two 617s in the circuit</h2>
+<p>Each 617's <span class="mono">INPUT</span> is a triaxial socket, so you cannot clip a banana lead
+straight on. Screw a <b>triax-to-dual-banana adapter</b> onto it. That gives you two banana posts,
+<b>HI</b> and <b>LO</b>.</p>
+
+<b class="lbl">Amps meter &mdash; goes inside the wire</b>
+<p>Current can only be measured by making it flow through the meter, so you cut the PV+ line and put
+the meter in the gap. The wire that used to run from the cell straight to J1 now runs through the
+meter instead:</p>
+<div class="wire">cell + &nbsp;&rarr;&nbsp; HI post<br>LO post &nbsp;&rarr;&nbsp; J1</div>
+
+<b class="lbl">Volts meter &mdash; sits across the cell</b>
+<p>Nothing is cut. Two leads simply touch the cell's own two terminals:</p>
+<div class="wire">HI post &nbsp;&rarr;&nbsp; cell +<br>LO post &nbsp;&rarr;&nbsp; cell &minus;</div>
+<p>Put these on the <b>cell leads themselves</b>, not on J1 and J3. On J1 you would be reading through
+the amps meter as well, which makes the voltage read low.</p>
+</section>
+
+<section>
+<h2>The EDFA interlock</h2>
+<p>Small connector on the back of the amplifier. It is a laser safety cutout: the amplifier only emits
+while that circuit is closed, the idea being that you wire it to a door switch so opening the door
+kills the beam. <b>Plug in the shorting plug it shipped with.</b> With nothing in it the laser will not
+turn on at all, no matter what the software asks for.</p>
+</section>
+
+<section>
+<div class="box">
+<b>LASER &mdash; Class 3B, 1550 nm, invisible.</b> It emits up to 30 mW whenever it is enabled, even at
+zero pump current and with no optical input. Terminate the output before running. Never look into the
+fibre bulkhead.
 </div>
+</section>
 
-<div class="warn">
-<b>Laser</b><br>
-The EDFA100P is <b>Class 3B at 1550 nm</b>, which is invisible. It emits up to 30 mW of amplified
-spontaneous emission with no optical input, at any pump current, whenever it is enabled. Terminate
-the output before running. Never look into the fibre bulkhead. If the interlock trips, it was opened
-by a person &mdash; software will not re-enable it and neither should you until you know why.
+<section>
+<div class="box">
+<b>WHY THE POWER ORDER MATTERS.</b> With 5 V up, K1 closed and 24 V missing, K1 shorts out R1 and the
+cell drives straight into the DigiPot's input clamp at 80% of its absolute maximum. That is what kills
+a chip. The cell goes on last and comes off first for that reason.
 </div>
-
-<p class="note"><b>Shortcut for repeat runs:</b> the jacks do not have to be cycled each time. A dark cell
-sources almost nothing, so blocking the light is equivalent to unplugging it and spares the connectors.</p>
-</div>
-
-<!-- ================= PAGE 3 ================= -->
-<div class="page">
-<h1>Wiring 1 &nbsp;&middot;&nbsp; Handheld meter + 24 V</h1>
-<p class="sub">Board bring-up. No cell, no laser, no bench meters. The handheld stands in for the cell.</p>
-
-<svg viewBox="0 0 720 330" xmlns="http://www.w3.org/2000/svg">
-  <g fill="none" stroke="#000" stroke-width="1.4">
-    <rect x="12" y="20" width="120" height="52" rx="4"/>
-    <rect x="12" y="130" width="120" height="52" rx="4"/>
-    <rect x="270" y="16" width="180" height="60" rx="4"/>
-    <rect x="270" y="120" width="180" height="180" rx="4"/>
-    <rect x="560" y="130" width="140" height="76" rx="4"/>
-  </g>
-  <g font-size="11" fill="#000">
-    <text x="72" y="42" text-anchor="middle" font-weight="600">Laptop</text>
-    <text x="72" y="57" text-anchor="middle" font-size="9">MATLAB R2022a</text>
-    <text x="72" y="152" text-anchor="middle" font-weight="600">24 V supply</text>
-    <text x="72" y="167" text-anchor="middle" font-size="9">limit ~100 mA</text>
-    <text x="360" y="40" text-anchor="middle" font-weight="600">Arduino Uno</text>
-    <text x="360" y="56" text-anchor="middle" font-size="9">COM4</text>
-    <text x="360" y="143" text-anchor="middle" font-weight="600">PVLoad-R1 board</text>
-    <text x="630" y="155" text-anchor="middle" font-weight="600">Handheld DMM</text>
-    <text x="630" y="170" text-anchor="middle" font-size="9">set to ohms (&#8486;)</text>
-  </g>
-
-  <!-- header block on board -->
-  <g fill="none" stroke="#000" stroke-width="1">
-    <rect x="292" y="158" width="136" height="20" rx="2"/>
-  </g>
-  <text x="360" y="172" text-anchor="middle" font-size="9">1&times;10 header &mdash; 10 wires</text>
-
-  <!-- jacks -->
-  <g stroke="#000" stroke-width="1.2" fill="#fff">
-    <circle cx="300" cy="218" r="9"/><circle cx="300" cy="250" r="9"/><circle cx="300" cy="282" r="9"/>
-  </g>
-  <g font-size="10" fill="#000">
-    <text x="316" y="222">J1 &nbsp;PV+ (red)</text>
-    <text x="316" y="254">J2 &nbsp;+24 V (red)</text>
-    <text x="316" y="286">J3 &nbsp;GND (black)</text>
-  </g>
-
-  <!-- USB -->
-  <path d="M132 46 L270 46" stroke="#000" stroke-width="1.4" fill="none"/>
-  <text x="201" y="40" text-anchor="middle" font-size="9">USB-A to USB-B</text>
-
-  <!-- header wires -->
-  <path d="M360 76 L360 158" stroke="#000" stroke-width="1.4" fill="none"/>
-  <text x="368" y="112" font-size="9">5V, GND, D6&#8211;D13</text>
-
-  <!-- 24V + to J2 -->
-  <path d="M132 148 L200 148 L200 250 L291 250" stroke="#000" stroke-width="1.4" fill="none"/>
-  <text x="204" y="144" font-size="9">+ (red)</text>
-  <!-- 24V - to J3 -->
-  <path d="M132 168 L176 168 L176 282 L291 282" stroke="#000" stroke-width="1.4" fill="none"/>
-  <text x="180" y="164" font-size="9">&minus; (black)</text>
-
-  <!-- DMM to J1 -->
-  <path d="M560 150 L500 150 L500 218 L309 218" stroke="#000" stroke-width="1.4" fill="none"/>
-  <text x="512" y="144" font-size="9">V&#8486; socket</text>
-  <!-- DMM to J3 -->
-  <path d="M560 190 L470 190 L470 300 L300 300 L300 291" stroke="#000" stroke-width="1.4" fill="none"/>
-  <text x="482" y="184" font-size="9">COM socket</text>
-</svg>
-<p class="cap">Both the supply return and the meter's COM lead land on J3. Use a stacking banana plug.</p>
-
-<div class="warn">
-<b>Do not</b> put the red lead in the meter's <span class="mono">10A</span> socket. In that socket the
-meter is a piece of wire and you would be shorting J1 to J3.
-</div>
-
-<h3>Power order for this setup</h3>
-<p><b>Up:</b> 24 V output on &rarr; Arduino USB in &rarr; run.&nbsp;&nbsp;
-   <b>Down:</b> stop &rarr; Arduino USB out &rarr; 24 V output off.<br>
-   The meter leads stay plugged in throughout, both ways. In ohms mode a handheld is not a source and
-   cannot hurt anything.</p>
-</div>
-
-<!-- ================= PAGE 4 ================= -->
-<div class="page">
-<h1>Wiring 2 &nbsp;&middot;&nbsp; Two Keithley 617 + 24 V</h1>
-<p class="sub">Proving the GPIB chain and the 617 command dialect before a cell is involved. Meter inputs left open.</p>
-
-<svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg">
-  <g fill="none" stroke="#000" stroke-width="1.4">
-    <rect x="12" y="20" width="120" height="52" rx="4"/>
-    <rect x="12" y="200" width="120" height="52" rx="4"/>
-    <rect x="196" y="20" width="122" height="52" rx="4"/>
-    <rect x="380" y="14" width="150" height="56" rx="4"/>
-    <rect x="380" y="98" width="150" height="56" rx="4"/>
-    <rect x="196" y="190" width="180" height="90" rx="4"/>
-  </g>
-  <g font-size="11" fill="#000">
-    <text x="72" y="42" text-anchor="middle" font-weight="600">Laptop</text>
-    <text x="72" y="57" text-anchor="middle" font-size="9">NI-VISA 20.0</text>
-    <text x="72" y="222" text-anchor="middle" font-weight="600">24 V supply</text>
-    <text x="257" y="42" text-anchor="middle" font-weight="600">USB&#8211;GPIB</text>
-    <text x="257" y="57" text-anchor="middle" font-size="9">NI GPIB-USB-HS</text>
-    <text x="455" y="36" text-anchor="middle" font-weight="600">Keithley 617 &mdash; VOLTS</text>
-    <text x="455" y="52" text-anchor="middle" font-size="9">GPIB address 22</text>
-    <text x="455" y="120" text-anchor="middle" font-weight="600">Keithley 617 &mdash; AMPS</text>
-    <text x="455" y="136" text-anchor="middle" font-size="9">GPIB address 23</text>
-    <text x="286" y="212" text-anchor="middle" font-weight="600">PVLoad-R1 + Arduino</text>
-    <text x="286" y="228" text-anchor="middle" font-size="9">as in Wiring 1</text>
-  </g>
-
-  <path d="M132 46 L196 46" stroke="#000" stroke-width="1.4" fill="none"/>
-  <text x="164" y="40" text-anchor="middle" font-size="9">USB</text>
-
-  <path d="M318 46 L380 42" stroke="#000" stroke-width="1.4" fill="none"/>
-  <text x="349" y="34" text-anchor="middle" font-size="9">IEEE-488</text>
-
-  <path d="M455 70 L455 98" stroke="#000" stroke-width="1.4" fill="none"/>
-  <text x="463" y="88" font-size="9">IEEE-488 (stacked connector)</text>
-
-  <path d="M132 214 L164 214 L164 246 L196 246" stroke="#000" stroke-width="1.4" fill="none"/>
-  <text x="140" y="264" font-size="9">J2 / J3</text>
-
-  <g font-size="9" fill="#333">
-    <text x="546" y="42">INPUT left</text>
-    <text x="546" y="54">open</text>
-    <text x="546" y="126">INPUT left</text>
-    <text x="546" y="138">open</text>
-  </g>
-</svg>
-<p class="cap">GPIB is a bus. One adapter serves both meters &mdash; IEEE-488 connectors stack, so the second
-cable runs meter to meter rather than back to the PC.</p>
-
-<h3>Before this works</h3>
-<ul>
-  <li>Each 617 must be on its own <b>primary address</b>, set from its front panel. They default to
-      27, which collides. Use 22 for volts and 23 for amps.</li>
-  <li>The USB-GPIB adapter must be the same brand as the VISA runtime on the laptop. Mixing them is
-      the usual reason nothing is found.</li>
-  <li>Let the meters warm up before trusting a reading.</li>
-</ul>
-
-<h3>What it proves</h3>
-<p>That the adapter, the cables and the two addresses are all good, and that the laptop can identify
-each meter, configure it and read from it. Everything except the measurement wiring, which Wiring 3
-adds.</p>
-
-<div class="warn">
-<b>Absolute maximum on the 617 volts input is 250 V peak.</b> The amps function stops at 20 mA and there
-is nothing above it; a cell that outruns 20 mA needs an external shunt.
-</div>
-</div>
-
-<!-- ================= PAGE 5 ================= -->
-<div class="page">
-<h1>Wiring 3 &nbsp;&middot;&nbsp; Full experiment</h1>
-<p class="sub">PV cell, both 617s, EDFA100P, 24 V supply, board. Everything connected at once.</p>
-
-<h3>3a &nbsp; The measurement loop</h3>
-<svg viewBox="0 0 720 330" xmlns="http://www.w3.org/2000/svg">
-  <g fill="none" stroke="#000" stroke-width="1.4">
-    <rect x="40" y="80" width="130" height="70" rx="4"/>
-    <rect x="270" y="30" width="150" height="50" rx="4"/>
-    <rect x="250" y="190" width="170" height="55" rx="4"/>
-    <rect x="540" y="80" width="160" height="160" rx="4"/>
-    <rect x="380" y="285" width="100" height="38" rx="4"/>
-  </g>
-  <g font-size="10.5" fill="#000">
-    <text x="105" y="105" text-anchor="middle" font-weight="600">PV cell</text>
-    <text x="105" y="120" text-anchor="middle" font-size="8.5">power-over-fibre</text>
-    <text x="105" y="133" text-anchor="middle" font-size="8.5">receiver</text>
-    <text x="345" y="52" text-anchor="middle" font-weight="600">617 &mdash; AMPS</text>
-    <text x="345" y="67" text-anchor="middle" font-size="8.5">in series, addr 23</text>
-    <text x="335" y="213" text-anchor="middle" font-weight="600">617 &mdash; VOLTS</text>
-    <text x="335" y="228" text-anchor="middle" font-size="8.5">across the cell, addr 22</text>
-    <text x="620" y="102" text-anchor="middle" font-weight="600">PVLoad-R1</text>
-    <text x="430" y="309" text-anchor="middle" font-weight="600" font-size="10">24 V supply</text>
-  </g>
-
-  <g stroke="#000" stroke-width="1.2" fill="#fff">
-    <circle cx="565" cy="125" r="9"/><circle cx="565" cy="180" r="9"/><circle cx="565" cy="222" r="9"/>
-  </g>
-  <g font-size="9.5" fill="#000">
-    <text x="582" y="129">J1 &nbsp;PV+</text>
-    <text x="582" y="184">J3 &nbsp;GND</text>
-    <text x="582" y="226">J2 &nbsp;+24 V</text>
-  </g>
-
-  <g fill="none" stroke="#000" stroke-width="1.8">
-    <path d="M170 100 H215 V55 H270"/>
-    <path d="M420 55 H490 V125 H556"/>
-    <path d="M105 150 V270 H500 V180 H556"/>
-  </g>
-  <g fill="none" stroke="#000" stroke-width="1.1">
-    <path d="M250 205 H196 V100 H171"/>
-    <path d="M250 230 H105"/>
-    <path d="M480 296 H520 V222 H556"/>
-    <path d="M430 285 V270"/>
-  </g>
-  <g fill="#000">
-    <circle cx="105" cy="230" r="3"/><circle cx="430" cy="270" r="3"/>
-    <circle cx="170" cy="100" r="3"/>
-  </g>
-
-  <g font-size="8.5" fill="#000">
-    <text x="222" y="50">cell +</text>
-    <text x="452" y="50">HI &rarr; LO</text>
-    <text x="500" y="110">to J1</text>
-    <text x="118" y="200">cell &minus;</text>
-    <text x="300" y="262" text-anchor="middle">cell &minus; and the supply return both land on J3</text>
-    <text x="203" y="196" text-anchor="end">HI</text>
-    <text x="203" y="243" text-anchor="end">LO</text>
-  </g>
-</svg>
-<p class="cap">Thick lines carry the cell current. The ammeter breaks the PV+ lead outside the board; the
-voltmeter taps the cell terminals directly, <b>upstream of the ammeter</b>.</p>
-
-<h3>3b &nbsp; Cables back to the PC</h3>
-<svg viewBox="0 0 720 205" xmlns="http://www.w3.org/2000/svg">
-  <g fill="none" stroke="#000" stroke-width="1.4">
-    <rect x="16" y="14" width="110" height="176" rx="4"/>
-    <rect x="185" y="16" width="120" height="44" rx="4"/>
-    <rect x="390" y="16" width="150" height="44" rx="4"/>
-    <rect x="185" y="82" width="120" height="44" rx="4"/>
-    <rect x="355" y="82" width="115" height="44" rx="4"/>
-    <rect x="520" y="82" width="115" height="44" rx="4"/>
-    <rect x="185" y="148" width="120" height="44" rx="4"/>
-    <rect x="390" y="148" width="150" height="44" rx="4"/>
-  </g>
-  <g font-size="10.5" fill="#000">
-    <text x="71" y="98" text-anchor="middle" font-weight="600">Laptop</text>
-    <text x="71" y="113" text-anchor="middle" font-size="8.5">MATLAB</text>
-    <text x="245" y="36" text-anchor="middle" font-weight="600">Arduino Uno</text>
-    <text x="245" y="50" text-anchor="middle" font-size="8.5">COM4</text>
-    <text x="465" y="36" text-anchor="middle" font-weight="600">PVLoad-R1 board</text>
-    <text x="465" y="50" text-anchor="middle" font-size="8.5">1&times;10 header</text>
-    <text x="245" y="102" text-anchor="middle" font-weight="600">USB&#8211;GPIB</text>
-    <text x="245" y="116" text-anchor="middle" font-size="8.5">NI GPIB-USB-HS</text>
-    <text x="412" y="102" text-anchor="middle" font-weight="600">617 VOLTS</text>
-    <text x="412" y="116" text-anchor="middle" font-size="8.5">addr 22</text>
-    <text x="577" y="102" text-anchor="middle" font-weight="600">617 AMPS</text>
-    <text x="577" y="116" text-anchor="middle" font-size="8.5">addr 23</text>
-    <text x="245" y="168" text-anchor="middle" font-weight="600">EDFA100P</text>
-    <text x="245" y="182" text-anchor="middle" font-size="8.5">COM5</text>
-    <text x="465" y="168" text-anchor="middle" font-weight="600">PV cell</text>
-    <text x="465" y="182" text-anchor="middle" font-size="8.5">fibre input</text>
-  </g>
-  <g fill="none" stroke="#000" stroke-width="1.4">
-    <path d="M126 38 H185"/><path d="M305 38 H390"/>
-    <path d="M126 104 H185"/><path d="M305 104 H355"/><path d="M470 104 H520"/>
-    <path d="M126 170 H185"/>
-  </g>
-  <path d="M305 170 H390" stroke="#000" stroke-width="1.4" stroke-dasharray="5 3" fill="none"/>
-  <g font-size="8.5" fill="#000" text-anchor="middle">
-    <text x="155" y="32">USB-B</text>
-    <text x="347" y="32">10 wires</text>
-    <text x="155" y="98">USB</text>
-    <text x="330" y="98">IEEE-488</text>
-    <text x="495" y="98">IEEE-488</text>
-    <text x="155" y="164">USB</text>
-    <text x="347" y="164">fibre, 1550 nm</text>
-  </g>
-</svg>
-<p class="cap">Three independent chains. GPIB is a bus, so both 617s hang off one adapter with the second
-cable running meter to meter.</p>
-
-<div class="warn">
-<b>The voltmeter goes on the cell side of the ammeter</b> &mdash; directly on the cell leads, not across
-J1 and J3. Downstream of the ammeter it reads low by the burden drop. On a 617 that is under 1 mV on
-every range except 20 mA, where it is 3 mV, so it no longer swamps the Isc end &mdash; but the rule is unchanged.
-</div>
+</section>
 
 </div>
-
 </body>
 </html>
