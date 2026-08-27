@@ -221,6 +221,28 @@ debug once two TSSOP packages are soldered down.
   previous reading, every point is lagged by one state and the curve is shifted
   rather than wrong-looking. Check it at bring-up by stepping between two widely
   separated load states; `DMM_PARALLEL = false` is the fallback.
+- The 34401A profile is written from the published command set and has not been
+  run against the instrument either. `RUN = "meters"` tests it the same way, and
+  `SYST:ERR?` after configuration is the equivalent guard. Two things in it are
+  worth checking first: that `FETC?` waits for the conversion `INIT` started
+  rather than returning stale data, which is what the overlapped read depends
+  on, and that `INP:IMP:AUTO ON` survives the `CONF` that precedes it.
+- The 34401A's volts input is 10 Mohm unless `INP:IMP:AUTO ON` raises it, and
+  that command only reaches the 100 mV, 1 V, and 10 V ranges. Against the
+  470 kohm `OPEN` path, 10 Mohm reads Voc about 4.5% low. A `VOC_FULL` above
+  10 V puts the meter on a range where the divider is back and nothing in the
+  configuration warns about it.
+- The 196 has the same divider and no way out of it. Its 30 V range, which is
+  where a 9 V Voc lands, is 10 Mohm, and there is no input impedance command to
+  raise it. So on a mixed bench the 34401A is the better voltmeter and the 196
+  the better ammeter, which is the opposite of the way the two were first wired.
+  The code does not enforce that; `DMM_V_MODEL` and `DMM_I_MODEL` are the
+  operator's call.
+- The profile is per meter rather than per bench because a lab is stocked with
+  what it has. Nothing above the transport is shared between the Keithley
+  dialect and SCPI, so the pair travels together: an open port and the profile
+  that describes it. That is what lets one sweep trigger a 196 with a bare X and
+  a 34401A with INIT in the same pass.
 
 ## Procedure requirements
 
