@@ -20,7 +20,7 @@ is common to both and cancels. Design any new check the same way.
 
 ## The diagnostic modes
 
-The first four open the board and nothing else. No laser, no bench meters.
+The first four open the board and nothing else. No cell, no bench meters.
 
 | `RUN` | States | Answers |
 |---|---|---|
@@ -31,8 +31,8 @@ The first four open the board and nothing else. No laser, no bench meters.
 | `"ohms"` | 769 | The same question, measured rather than eyeballed |
 
 `"ohms"` is `"ramp"` without a person copying numbers off a handheld. It puts one
-electrometer on ohms across J1 and J3, walks every state in the sweep, and writes
-the readings to CSV with a plot. Still no cell and no amplifier. It takes one
+meter on ohms across J1 and J3, walks every state in the sweep, and writes
+the readings to CSV with a plot. Still no cell. It takes one
 meter rather than the pair, so it ignores `DMM_ENABLED` and takes its address
 from `DMM_R_ADDRESS`. Around twelve minutes at the default `OHMS_SETTLE`.
 

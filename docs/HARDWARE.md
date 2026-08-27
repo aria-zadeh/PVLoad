@@ -16,9 +16,9 @@ The board is placed in a single series loop with a PV cell. Sweeping the load an
 voltage and current at each step traces the cell's I-V curve, from which the maximum power
 point, fill factor, and matched load resistance are computed.
 
-**The board contains no measurement circuitry.** Voltage and current are read by two external
-Keithley 617 electrometers addressed over VISA. Software sets the load state, reads both meters at each point, and
-writes the results to CSV.
+**The board contains no measurement circuitry.** Voltage and current are read by two external bench
+multimeters addressed over VISA, a Keithley 196 and an Agilent 34401A. Software sets the load state,
+reads both meters at each point, and writes the results to CSV.
 
 ### Design targets
 
@@ -247,7 +247,7 @@ across J1 and J3: a voltmeter placed at the jacks sits downstream of the ammeter
 the burden drop. See the note at the end of this section.
 
 Two meters are needed to capture the same operating point. With one meter each point must be
-visited twice, which assumes illumination has not changed between readings.
+visited twice, which assumes the light has not changed between readings.
 
 ### Sweep order
 
@@ -287,32 +287,37 @@ One row per sampled point:
 | `timestamp` | ISO 8601 |
 
 Illumination conditions must be recorded once per sweep. An I-V curve is only meaningful at a
-stated illumination. The control software now sets illumination itself, with a Thorlabs EDFA100P
-fiber amplifier, and repeats the whole sweep at each of several optical powers. The amplifier is
-not part of this board and is documented in its own manual, Thorlabs TTN118382-D02 Rev C. What
-matters here is that each logged row belongs to a stated pump current, so the log gains
-`level_current_ma` and `level_power_mw` columns ahead of the ones above.
+stated illumination, and the control software neither sets it nor knows it: the lamp is an operator
+matter, and one run of the sweep is one curve at whatever light the bench is under. Nothing in the
+log records that, so `RUN_TAG` goes into the file name and is where the illumination has to be
+written down.
 
 Two notes on putting bench meters in this circuit. Neither is a board problem, and neither needs a
 board change.
 
-**Put the voltmeter on the cell side of the ammeter.** Any ammeter costs the loop some voltage. A
-general-purpose DMM drops it across an internal shunt and takes about 80 mV at 16 mA on a 5 ohm
-range; the 617 is a feedback ammeter and takes under 1 mV on every range but 20 mA, where it takes
-3 mV. With the ammeter ahead of J1, a voltmeter across J1 and J3 sits *downstream* of that drop and
-reads short of the cell's terminal voltage by it. Clipping the voltmeter directly to the cell
-leads, upstream of the ammeter, removes it. On a 617 the error is small either way, and it still
-costs nothing to get right.
+**Put the voltmeter on the cell side of the ammeter.** Any ammeter costs the loop some voltage, and
+both meters here drop it across an internal shunt: 5 ohm on the 34401A's 10 mA and 100 mA ranges,
+which is 80 mV at 16 mA. With the ammeter ahead of J1, a voltmeter across J1 and J3 sits
+*downstream* of that drop and reads short of the cell's terminal voltage by it. Clipping the
+voltmeter directly to the cell leads, upstream of the ammeter, removes it. At 80 mV against a 9 V
+Voc this is not a rounding error, so it is worth getting right rather than merely tidy.
 
-**The burden shifts where `SHORT` lands, and that is all.** With 3 mV inline the cell sits near
-5 mV at the `SHORT` state rather than at the 0.150 ohm contact alone. That does not corrupt the
-measurement, because voltage is measured at every point rather than assumed: `SHORT` is simply the
-lowest-voltage point on the curve, not a point defined to be at zero. Isc is the V -> 0 intercept
-extrapolated from the lowest few points, which is how it should be extracted in any case.
+**The burden shifts where `SHORT` lands, and that is all.** With tens of millivolts inline the cell
+sits above the 0.150 ohm contact alone at the `SHORT` state. That does not corrupt the measurement,
+because voltage is measured at every point rather than assumed: `SHORT` is simply the lowest-voltage
+point on the curve, not a point defined to be at zero. Isc is the V -> 0 intercept extrapolated from
+the lowest few points, which is how it should be extracted in any case.
 
-The current range is not a choice. The 617 stops at 20 mA and the ranges below it are decades
-apart, so a ~16 mA cell fits one range and no other. A cell that outruns 20 mA needs an external
-shunt or a lower illumination; the software refuses it rather than reading a saturated range.
+**Put the 34401A on volts.** Neither meter is an electrometer, so at the `OPEN` state each is a
+finite impedance across a 470 kohm source. A 10 Mohm input reads Voc about 4.5% low. The 34401A can
+be told to raise its input above 10 Gohm on its 100 mV, 1 V and 10 V ranges, and the software sends
+that command to whichever meter is the voltmeter; the 196 has no such command and its 30 V range,
+where a 9 V cell lands, is 10 Mohm. On current the two are close enough that the choice does not
+matter. This is a wiring decision, not a board one, and nothing in the software can detect it.
+
+The current range is not much of a choice either. A ~16 mA cell lands on the 196's 30 mA range and
+the 34401A's 100 mA range. A cell that outruns the top range needs an external shunt or weaker
+light; the software refuses it rather than reading a saturated range.
 
 ---
 
