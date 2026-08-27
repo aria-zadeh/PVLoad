@@ -24,7 +24,7 @@ clc;
 %   "meters"  electrometers only
 %   "sweep"   the full experiment, written to CSV
 
-RUN = "meters";  
+RUN = "ohms";  
 
 
 % Ports and addresses, and what each one needs on the bench. Wiring and the
@@ -38,7 +38,7 @@ RUN = "meters";
 %                 or it will not enable, whatever this file asks for.
 %   DMM_*_ADDRESS neither meter has anything but an IEEE-488 connector,
 %                 so each needs a USB-GPIB adapter matched to the VISA,
-%                 which here is NI. one adapter carries both meters: the
+%                 which here is Keysight. one adapter carries both meters: the
 %                 connectors stack, so the second cable runs meter to meter
 %                 rather than back to the laptop. give each meter its own
 %                 primary address from its front panel first, because they
@@ -51,8 +51,9 @@ EDFA_ENABLED  = false;               % set to true if laser enabled
 EDFA_PORT     = "COM5";              % amplifier port
 
 DMM_ENABLED   = false;               % set to true if both sweep meters are
-                                     % attached. DMM_MODEL, in part 2, says
-                                     % which instrument they are.
+                                     % attached. the DMM_*_MODEL settings in
+                                     % part 2 say which instrument each one
+                                     % is; they need not be the same.
 DMM_V_ADDRESS = "GPIB0::22::INSTR";  % meter across the cell
 DMM_I_ADDRESS = "GPIB0::23::INSTR";  % meter in series with PV+
 
@@ -67,8 +68,9 @@ DMM_R_ADDRESS = "GPIB0::1::INSTR";  % the one meter RUN "ohms" uses, on
 
 % roughly what your cell does at POWER_FULL. sizes the ammeter range and
 % prints estimates only, never enters a result, so rough is fine. the one
-% place it is not advisory is the 20 mA ceiling: the 617 has no range above
-% it, so an ISC_FULL past that is refused rather than measured badly.
+% place it is not advisory is the top of the ammeter: an ISC_FULL above the
+% highest range the configured meter has is refused rather than measured
+% badly. On a 617 that ceiling is 20 mA.
 
 ISC_FULL   = 0.016;        % A, short-circuit current at POWER_FULL
 VOC_FULL   = 9;            % V, open-circuit voltage at POWER_FULL
@@ -209,27 +211,46 @@ EDFA_TEMP_TOL     = 0.5;   % degC that temp? may differ from target?
 EDFA_VERIFY       = true;  % query every setting back after writing it
 
 
-% meters on GPIB. Two instruments are supported and DMM_MODEL picks which
-% one is on the bench:
+% meters. Three instruments are supported:
 %
-%   "617"  Keithley 617 programmable electrometer. Two of them run a sweep,
-%          one on volts and one on amps.
-%   "196"  Keithley 196 system DMM. A 6.5 digit meter, not an electrometer,
-%          so it has no zero check and its current ranges start far above
-%          the 617's. Enough for RUN "ohms", and enough for a sweep of a
-%          cell whose Isc lands inside its lowest amps range.
+%   "617"     Keithley 617 programmable electrometer.
+%   "196"     Keithley 196 system DMM. A 6.5 digit meter, not an
+%             electrometer, so it has no zero check and its current ranges
+%             start far above the 617's.
+%   "34401A"  Agilent 34401A. Also 6.5 digits, and the same trade as the
+%             196: no electrometer front end, amps starting at 10 mA. What
+%             it adds is an integration time to set and a switchable high
+%             impedance input.
 %
-% Both predate SCPI and speak the same shape of language: a command is a
-% letter and a number, several of them travel in one string, and none of
-% them do anything until an X arrives. Neither has a serial port, so VISA
-% over GPIB is the only way in. What differs is which letter means what,
-% and that lives in the two profiles below.
+% The model is named per meter rather than once, because a bench is stocked
+% with whatever it has and the voltmeter and the ammeter need not be the
+% same instrument. Each meter carries its own profile from the moment it is
+% opened, so a sweep can run a 196 on volts and a 34401A on amps.
+%
+% The two Keithleys predate SCPI and speak the same shape of language: a
+% command is a letter and a number, several of them travel in one string,
+% and none of them do anything until an X arrives. The 34401A is SCPI, so
+% commands are words, one per line, and a reading is a bare number with no
+% prefix in front of it. Nothing above the transport is shared between the
+% two dialects, so each profile below carries a Dialect and the handful of
+% functions that talk to the bus branch on it.
 
-DMM_MODEL        = "196";          % "617" or "196"
+DMM_V_MODEL      = "196";          % "617", "196" or "34401A", per meter.
+DMM_I_MODEL      = "34401A";       % the sweep's two, and then the single
+DMM_R_MODEL      = "196";          % meter RUN "ohms" opens
 DMM_TIMEOUT      = 10;             % s, must exceed one conversion
 DMM_ZERO_CORRECT = true;           % null a range's own offset when it is
-                                   % set. 617 only; the 196 has no zero
-                                   % check and ignores this.
+                                   % set. the 617 does it with zero check,
+                                   % the 34401A with autozero, which costs
+                                   % a second conversion per reading. the
+                                   % 196 has neither and ignores this.
+DMM_NPLC         = 10;             % power line cycles per conversion.
+                                   % 34401A only: 0.02, 0.2, 1, 10 or 100.
+                                   % 10 is the 6.5 digit setting. the two
+                                   % Keithleys convert on a fixed schedule
+                                   % and ignore this.
+DMM_LINE_HZ      = 60;             % mains frequency, which is what turns
+                                   % DMM_NPLC into seconds
 DMM_V_RANGE      = 0;              % V, or 0 to pick the smallest range
                                    % that holds VOC_FULL
 DMM_I_RANGE      = 0;              % A, or 0 to pick per level from ISC_FULL
@@ -256,6 +277,10 @@ DMM_MAX_FAULTS   = 5;              % consecutive read failures before abort
 % ddcTell appends the X, so nothing here carries one.
 DDC_617 = struct( ...
     'Model',      "617", ...
+    'Label',      "Keithley 617", ...
+    'Dialect',    "ddc", ...
+    'ReadTerm',   "CR/LF", ...
+    'WriteTerm',  "LF", ...
     'IdPrefix',   "617", ...
     'Volts',      "F0", ...
     'Amps',       "F1", ...
@@ -293,6 +318,10 @@ DDC_617 = struct( ...
 % C1/Z1/C0 sequence is not sent and DMM_ZERO_CORRECT does nothing here.
 DDC_196 = struct( ...
     'Model',      "196", ...
+    'Label',      "Keithley 196", ...
+    'Dialect',    "ddc", ...
+    'ReadTerm',   "CR/LF", ...
+    'WriteTerm',  "LF", ...
     'IdPrefix',   "196", ...
     'Volts',      "F0", ...
     'Amps',       "F3", ...
@@ -315,13 +344,74 @@ DDC_196 = struct( ...
 %   which is what the conversion figure above assumes; and convert once per
 %   X. Ranges are the 3 / 30 / 300 decades this family uses.
 
-switch DMM_MODEL
-    case "617", DDC = DDC_617;
-    case "196", DDC = DDC_196;
-    otherwise
-        error("PVLoad:BadMeterModel", ...
-            "DMM_MODEL is ""%s"". It must be ""617"" or ""196"".", DMM_MODEL);
-end
+% Agilent 34401A, manual 34401-90004, chapter 4.
+%
+% NOT VERIFIED AGAINST THE MANUAL ON THIS BENCH. The commands are ordinary
+% SCPI and the range lists are the published ones, but nothing here has
+% been run against the instrument. The SYST:ERR? query after every setup is
+% what catches a command it does not know, the same guard the 196 profile
+% leans on.
+%
+% Volts, Amps and Ohms are the SCPI function nodes rather than letters.
+% They serve twice: CONF:<node> <range> selects function and range in one
+% command, and <node>:NPLC sets the integration time afterwards. Order
+% matters, because CONF resets integration time, autozero and input
+% impedance to that function's defaults, so Common has to follow it.
+%
+% Common in order: immediate trigger, so INIT starts a conversion rather
+% than waiting on the bus; the settling delay the meter computes for the
+% function and range, which is what a fixed 0 would throw away; one trigger
+% and one sample, so a fetched reading is the reading and not the first of
+% a burst.
+SCPI_34401A = struct( ...
+    'Model',      "34401A", ...
+    'Label',      "Agilent 34401A", ...
+    'Dialect',    "scpi", ...
+    'ReadTerm',   "LF", ...
+    'WriteTerm',  "LF", ...
+    'IdPrefix',   "34401A", ...
+    'Volts',      "VOLT:DC", ...
+    'Amps',       "CURR:DC", ...
+    'Ohms',       "RES", ...
+    'AutoRange',  "RANG:AUTO ON", ...
+    'HasZeroCheck', false, ...
+    'Common',     ["TRIG:SOUR IMM", "TRIG:DEL AUTO", ...
+                   "TRIG:COUN 1", "SAMP:COUN 1"], ...
+    'AutoZero',   "ZERO:AUTO %s", ...
+    'HighZ',      "INP:IMP:AUTO ON", ...
+    'Nplc',       DMM_NPLC, ...
+    'Clear',      "*CLS", ...
+    'Trigger',    "INIT", ...
+    'Fetch',      "FETC?", ...
+    'Read',       "READ?", ...
+    'Machine',    "*IDN?", ...
+    'Error',      "SYST:ERR?", ...
+    'NoError',    "+0", ...
+    'Overflow',   9.8e37, ...
+    'Conversion', 0.06 + (1 + double(DMM_ZERO_CORRECT)) * ...
+                  DMM_NPLC / DMM_LINE_HZ, ...
+    'VRanges',    [0.1 1 10 100 1000], ...
+    'IRanges',    [0.01 0.1 1 3], ...
+    'RRanges',    [100 1e3 1e4 1e5 1e6 1e7 1e8]);
+%   Volts 100 mV to 1000 V by decades, amps 10 mA to 3 A, ohms 100 ohm to
+%   100 Mohm. Conversion is DMM_NPLC line cycles plus about 60 ms of
+%   command and range overhead, doubled when autozero is on because the
+%   meter takes a zero reading between every measurement.
+%
+%   HighZ is sent on the voltmeter only. The 34401A's DC volts input is
+%   10 Mohm unless this is set, and 10 Mohm across the 470 kohm OPEN path
+%   is a divider that reads Voc about 4.5% low. INP:IMP:AUTO ON raises it
+%   past 10 Gohm, but only on the 100 mV, 1 V and 10 V ranges: a VOC_FULL
+%   that pushes the meter onto 100 V puts the divider back.
+
+% One profile per meter rather than one for the bench. The three lists carry
+% different fields, so they travel in a cell array rather than a struct
+% array, and selectProfile matches on the Model field.
+PROFILES = {DDC_617, DDC_196, SCPI_34401A};
+
+DDC_V = selectProfile(PROFILES, DMM_V_MODEL, "DMM_V_MODEL");
+DDC_I = selectProfile(PROFILES, DMM_I_MODEL, "DMM_I_MODEL");
+DDC_R = selectProfile(PROFILES, DMM_R_MODEL, "DMM_R_MODEL");
 
 
 % settle = max(RELAY, SAFETY * (switch + TAUS * R * C_LOAD + CELL)).
@@ -406,24 +496,24 @@ cfg.Edfa = struct( ...
     'TempTol',      EDFA_TEMP_TOL, ...
     'Verify',       EDFA_VERIFY);
 
+% Each meter gets one spec holding everything about it: its profile, where
+% it lives, which range list applies to the function it will be asked for,
+% and how long a conversion takes. That is what travels down to the bus
+% functions, so nothing below this line has to know which of the three
+% meters it is holding, and the voltmeter and the ammeter can differ.
 cfg.Dmm = struct( ...
     'Enabled',     DMM_ENABLED, ...
-    'VAddress',    DMM_V_ADDRESS, ...
-    'IAddress',    DMM_I_ADDRESS, ...
-    'RAddress',    DMM_R_ADDRESS, ...
-    'Model',       DDC.Model, ...
     'Timeout',     DMM_TIMEOUT, ...
-    'Conversion',  DDC.Conversion, ...
-    'ZeroCorrect', DMM_ZERO_CORRECT && DDC.HasZeroCheck, ...
-    'VRange',      DMM_V_RANGE, ...
-    'VRanges',     DDC.VRanges, ...
-    'IRange',      DMM_I_RANGE, ...
-    'IRanges',     DDC.IRanges, ...
-    'RRange',      DMM_R_RANGE, ...
-    'RRanges',     DDC.RRanges, ...
+    'LineHz',      DMM_LINE_HZ, ...
     'Parallel',    DMM_PARALLEL, ...
     'MaxFaults',   DMM_MAX_FAULTS, ...
-    'Ddc',         DDC);
+    'ZeroCorrect', DMM_ZERO_CORRECT, ...
+    'V', meterSpec(DDC_V, DMM_V_ADDRESS, DMM_V_RANGE, DDC_V.VRanges, ...
+                   DMM_ZERO_CORRECT, DMM_TIMEOUT), ...
+    'I', meterSpec(DDC_I, DMM_I_ADDRESS, DMM_I_RANGE, DDC_I.IRanges, ...
+                   DMM_ZERO_CORRECT, DMM_TIMEOUT), ...
+    'R', meterSpec(DDC_R, DMM_R_ADDRESS, DMM_R_RANGE, DDC_R.RRanges, ...
+                   DMM_ZERO_CORRECT, DMM_TIMEOUT));
 
 cfg.Timing = struct( ...
     'RelaySettle', RELAY_SETTLE, ...
@@ -753,11 +843,11 @@ function runOhmsSweep(cfg)
         selfTestPotentiometers(board);
     end
 
-    fprintf("Ohms meter: %s\n", identifyMeter(meter, "ohms", cfg));
-    configureMeter(meter, "ohms", cfg.Dmm.RRange, cfg);
+    fprintf("Ohms meter: %s\n", identifyMeter(meter, "ohms"));
+    configureMeter(meter, "ohms", cfg.Dmm.R.Range);
 
     fprintf("\n%d states, about %.0f s in total.\n", numel(plan), ...
-        numel(plan) * (cfg.OhmsSettle + cfg.Dmm.Conversion));
+        numel(plan) * (cfg.OhmsSettle + cfg.Dmm.R.Conversion));
     fprintf("Meter goes on J1 and J3, set to ohms, with no cell connected.\n\n");
 
     measured = nan(numel(plan), 1);
@@ -801,16 +891,15 @@ function runOhmsSweep(cfg)
 end
 
 function [ohms, fault] = readOhms(meter)
-% One meter, so there is nothing to overlap and the trigger is a bare X.
-% A timeout comes back NaN and is counted rather than thrown, the same way
-% the sweep treats a dropped point.
+% One meter, so there is nothing to overlap and this is the plain trigger
+% and collect. A timeout comes back NaN and is counted rather than thrown,
+% the same way the sweep treats a dropped point.
 
     ohms  = NaN;
     fault = false;
 
     try
-        ddcTell(meter, "");
-        ohms = k617Decode(readline(meter));
+        ohms = meterReadOnce(meter);
     catch
         fault = true;
     end
@@ -856,64 +945,80 @@ function saveOhmsRun(cfg, plan, measured, stamps)
 end
 
 function plotOhmsRun(plan, measured, path)
-% Log axes because the sweep spans five decades, and the model plotted
-% alongside because the interesting part is where the two part company.
+% Linear axes, with the model plotted alongside because the interesting
+% part is where the two part company.
 %
-% The lower axes is the ratio rather than a difference or a percentage.
-% Both of those are dominated by one end of the sweep: the SHORT state
-% models at 0.150 ohm, so any offset at all is thousands of a percent
-% there, and R_AB's 20% at the top is tens of kohm. A ratio on a log axis
-% holds the whole range at once, and 1 is agreement.
+% The sweep spans five decades, so a linear upper axes is set by the top of
+% the range and everything below a kilohm sits on the x axis. The lower
+% axes is what carries the bottom of the sweep. It is the ratio rather than
+% a difference or a percentage because both of those are dominated by one
+% end: the SHORT state models at 0.150 ohm, so any offset at all is
+% thousands of a percent there, and R_AB's 20% at the top is tens of kohm.
+% A ratio holds the whole range at once, and 1 is agreement.
 %
-% Nothing is clipped. A reading the log axes cannot show is one the meter
-% returned as zero or negative, which happens at the bottom of the sweep
-% where the load is far below the 617's most sensitive ohms range, so the
-% count is printed rather than quietly dropped.
+% Two endpoints are left off the axes because each one sets a scale that
+% hides the other 767 states. OPEN comes off both: it is the 470 kohm
+% resistor rather than the ladders, and forty times the largest ladder
+% state. SHORT comes off the ratio axes only: it models at 0.150 ohm, so
+% the probe path alone puts its ratio near 3 while every other state sits
+% within a percent of 1.
+%
+% Both stay in the CSV, and the labels say what is missing. This is a
+% choice about the axes, not about what gets measured.
+%
+% Nothing else is clipped or blanked. A linear axes draws a zero or
+% negative reading where a log axes would have dropped it, so the count
+% below names only what the meter did not return at all.
 
     model = [plan.Resistance]';
     index = (1:numel(plan))';
     ratio = measured ./ model;
+    mode  = [plan.Mode]';
 
-    % A log axes drops a nonpositive point and warns about it once per
-    % axes. Blanking them to NaN puts that in the count below instead,
-    % where it names how many and says where they still are.
-    shown = measured;  shown(~(measured > 0)) = NaN;
-    scale = ratio;     scale(~(ratio > 0))    = NaN;
+    drawn = mode ~= "OPEN";
+    model(~drawn) = NaN;
+    shown = measured;
+    shown(~drawn) = NaN;
+
+    scaled = ratio;
+    scaled(~drawn | mode == "SHORT") = NaN;
 
     fig = figure("Name", "PVLoad resistance sweep", "Color", "w");
     layout = tiledlayout(fig, 2, 1, "TileSpacing", "compact", ...
         "Padding", "compact");
 
     ax1 = nexttile(layout);
-    semilogy(ax1, index, model, "-", "LineWidth", 1.0, ...
+    plot(ax1, index, model, "-", "LineWidth", 1.0, ...
         "DisplayName", "model");
     hold(ax1, "on");
-    semilogy(ax1, index, shown, ".", "MarkerSize", 6, ...
+    plot(ax1, index, shown, ".", "MarkerSize", 6, ...
         "DisplayName", "measured");
     hold(ax1, "off");
     grid(ax1, "on");
     ylabel(ax1, "resistance, ohm");
     legend(ax1, "Location", "northwest");
-    title(ax1, sprintf("%d states, J1 to J3", numel(plan)));
+    title(ax1, sprintf("%d states, J1 to J3, less the %d OPEN point(s)", ...
+        numel(plan), sum(~drawn)));
 
     ax2 = nexttile(layout);
-    semilogy(ax2, index, scale, ".", "MarkerSize", 6);
+    plot(ax2, index, scaled, ".", "MarkerSize", 6);
     yline(ax2, 1, "-");
     grid(ax2, "on");
     xlabel(ax2, "state index, ordered by the model");
     ylabel(ax2, "meter / model");
+    title(ax2, "SHORT and OPEN not shown", "FontWeight", "normal");
 
     linkaxes([ax1 ax2], "x");
-    xlim(ax1, [1 numel(plan)]);
+    xlim(ax1, [find(drawn, 1, "first") find(drawn, 1, "last")]);
 
     if strlength(path) > 0
         exportgraphics(fig, path, "Resolution", 200);
     end
 
-    hidden = sum(~(ratio > 0));
+    hidden = sum(isnan(measured));
     if hidden > 0
-        fprintf("%d point(s) read zero, negative or not at all and are " + ...
-            "in the CSV but not on the lower axes.\n", hidden);
+        fprintf("%d point(s) the meter did not return are in the CSV " + ...
+            "and are gaps on both axes.\n", hidden);
     end
 end
 
@@ -992,8 +1097,9 @@ function runMeterCheck(cfg)
 
     setCurrentRange(meas, cfg.Levels.IscFull, cfg);
 
-    fprintf("\nOne conversion takes about %.0f ms.\n", ...
-        1e3 * cfg.Dmm.Conversion);
+    fprintf("\nOne conversion takes about %.0f ms on the voltmeter and " + ...
+        "%.0f ms on the ammeter.\n", ...
+        1e3 * cfg.Dmm.V.Conversion, 1e3 * cfg.Dmm.I.Conversion);
     fprintf("Ten readings:\n");
     for k = 1:10
         [v, i, fault] = readPoint(meas, cfg);
@@ -1148,57 +1254,86 @@ function assertConfig(cfg)
     end
 
     D = cfg.Dmm;
-    if D.Enabled && D.VAddress == D.IAddress
+    if D.Enabled && D.V.Address == D.I.Address
         error("PVLoad:MeterAddressConflict", ...
             "Both meters are set to %s. They need separate addresses.", ...
-            D.VAddress);
+            D.V.Address);
     end
-    if D.Enabled && D.Timeout <= D.Conversion
+    if D.Enabled && D.Timeout <= max(D.V.Conversion, D.I.Conversion)
         error("PVLoad:MeterTimeoutTooShort", ...
             "DMM_TIMEOUT is %g s but one conversion takes %g s.", ...
-            D.Timeout, D.Conversion);
+            D.Timeout, max(D.V.Conversion, D.I.Conversion));
     end
-    if D.Enabled && D.VRange > 0
+    % Checked per meter, and not gated on D.Enabled, for the same reason
+    % DMM_R_RANGE is not: RUN "ohms" opens one meter and configures it
+    % through the same path. An NPLC the meter does not have is rejected at
+    % the bus with nothing to say which of these two numbers caused it.
+    assertNplc(D.V, D.LineHz);
+    assertNplc(D.I, D.LineHz);
+    assertNplc(D.R, D.LineHz);
+
+    if D.Enabled && D.V.Range > 0
         % Every range is named, so one that does not exist is a config
         % error here rather than something the meter sorts out later. A
         % zero means the range is sized from VOC_FULL or ISC_FULL instead,
-        % which is what keeps one configuration working on both meters.
-        rangeCode(D.VRange, D.VRanges, "DMM_V_RANGE");
+        % which is what keeps one configuration working on any of them.
+        rangeCode(D.V.Range, D.V.Ranges, "DMM_V_RANGE", D.V.Label);
     end
-    if D.Enabled && D.IRange > 0
-        rangeCode(D.IRange, D.IRanges, "DMM_I_RANGE");
+    if D.Enabled && D.I.Range > 0
+        rangeCode(D.I.Range, D.I.Ranges, "DMM_I_RANGE", D.I.Label);
     end
     % Not gated on D.Enabled: RUN "ohms" uses one meter and that flag is
     % about the pair the sweep needs.
-    if D.RRange > 0
-        rangeCode(D.RRange, D.RRanges, "DMM_R_RANGE");
+    if D.R.Range > 0
+        rangeCode(D.R.Range, D.R.Ranges, "DMM_R_RANGE", D.R.Label);
     end
-    if D.Enabled && cfg.Levels.VocFull > max([D.VRange, max(D.VRanges)])
+    if D.Enabled && cfg.Levels.VocFull > max([D.V.Range, max(D.V.Ranges)])
         error("PVLoad:VocAboveMeterRange", ...
             "VOC_FULL is %g V and the highest volts range the %s has is " + ...
             "%g V, so the OPEN point would overflow.", ...
-            cfg.Levels.VocFull, D.Model, max(D.VRanges));
+            cfg.Levels.VocFull, D.V.Label, max(D.V.Ranges));
     end
-    if D.Enabled && D.VRange > 0 && cfg.Levels.VocFull > D.VRange
+    if D.Enabled && D.V.Range > 0 && cfg.Levels.VocFull > D.V.Range
         error("PVLoad:VocAboveMeterRange", ...
             "VOC_FULL is %g V but DMM_V_RANGE is %g V, so the OPEN point " + ...
             "would overflow. Set it to 0 to size the range from VOC_FULL.", ...
-            cfg.Levels.VocFull, D.VRange);
+            cfg.Levels.VocFull, D.V.Range);
     end
-    if D.Enabled && cfg.Levels.IscFull > max(D.IRanges)
+    if D.Enabled && cfg.Levels.IscFull > max(D.I.Ranges)
         error("PVLoad:IscAboveMeterRange", ...
             "ISC_FULL is %g A and the %s stops at %g A. Nothing in the " + ...
             "instrument goes higher, so the cell has to be measured " + ...
             "through a shunt or at a lower illumination.", ...
-            cfg.Levels.IscFull, D.Model, max(D.IRanges));
+            cfg.Levels.IscFull, D.I.Label, max(D.I.Ranges));
     end
     if D.Enabled && cfg.Levels.IscFull > 0 && ...
-       cfg.Levels.IscFull < 0.001 * min(D.IRanges)
+       cfg.Levels.IscFull < 0.001 * min(D.I.Ranges)
         warning("PVLoad:IscFarBelowMeterRange", ...
             "ISC_FULL is %g A and the lowest amps range the %s has is " + ...
             "%g A, so the current reading is the bottom of a range. A " + ...
             "6.5 digit DMM is not an electrometer.", ...
-            cfg.Levels.IscFull, D.Model, min(D.IRanges));
+            cfg.Levels.IscFull, D.I.Label, min(D.I.Ranges));
+    end
+end
+
+function assertNplc(spec, lineHz)
+% DMM_NPLC and DMM_LINE_HZ are shared, but only a SCPI meter reads them, so
+% the check runs once per meter and stays quiet for the Keithleys.
+
+    if spec.Ddc.Dialect ~= "scpi"
+        return
+    end
+
+    nplc = [0.02 0.2 1 10 100];
+    if ~any(abs(nplc - spec.Ddc.Nplc) <= 1e-9 * nplc)
+        error("PVLoad:BadNplc", ...
+            "DMM_NPLC is %g. The %s has %s.", ...
+            spec.Ddc.Nplc, spec.Label, strjoin(string(nplc), ", "));
+    end
+    if lineHz <= 0
+        error("PVLoad:BadLineFrequency", ...
+            "DMM_LINE_HZ is %g. It is the mains frequency, 50 or 60.", ...
+            lineHz);
     end
 end
 
@@ -1435,8 +1570,10 @@ function reportPlan(cfg, plan, levels)
     end
 
     if cfg.Dmm.Enabled
-        fprintf("Meters: two Keithley %s, %.0f ms per conversion%s.\n", ...
-            cfg.Dmm.Model, 1e3 * cfg.Dmm.Conversion, ...
+        fprintf("Meters: %s on volts at %.0f ms, %s on amps at %.0f ms " + ...
+            "per conversion%s.\n", ...
+            cfg.Dmm.V.Label, 1e3 * cfg.Dmm.V.Conversion, ...
+            cfg.Dmm.I.Label, 1e3 * cfg.Dmm.I.Conversion, ...
             ternary(cfg.Dmm.Parallel, ", overlapped", ""));
     else
         fprintf("Meters: none. Voltage and current will be logged as NaN.\n");
@@ -1461,8 +1598,15 @@ function t = estimatePointTime(cfg, plan)
     t = mean(holds);
 
     if cfg.Dmm.Enabled
-        reads = 1 + double(~cfg.Dmm.Parallel);   % overlapped or one at a time
-        t = t + reads * cfg.Dmm.Conversion + 0.02;
+        % Overlapped, the pair costs the slower of the two; one at a time it
+        % costs both. Two different instruments make that a real difference
+        % rather than a doubling.
+        if cfg.Dmm.Parallel
+            reading = max(cfg.Dmm.V.Conversion, cfg.Dmm.I.Conversion);
+        else
+            reading = cfg.Dmm.V.Conversion + cfg.Dmm.I.Conversion;
+        end
+        t = t + reading + 0.02;
     end
 end
 
@@ -1929,34 +2073,94 @@ function meas = connectMeters(cfg)
         return
     end
 
-    meas.V = openMeter(cfg, cfg.Dmm.VAddress, "voltage");
-    meas.I = openMeter(cfg, cfg.Dmm.IAddress, "current");
+    meas.V = openMeter(cfg.Dmm.V, "voltage");
+    meas.I = openMeter(cfg.Dmm.I, "current");
 
-    meas.VId = identifyMeter(meas.V, "voltage", cfg);
-    meas.IId = identifyMeter(meas.I, "current", cfg);
+    meas.VId = identifyMeter(meas.V, "voltage");
+    meas.IId = identifyMeter(meas.I, "current");
     fprintf("Voltage meter: %s\n", meas.VId);
     fprintf("Current meter: %s\n", meas.IId);
 
-    configureMeter(meas.V, "voltage", pickVoltageRange(cfg), cfg);
-    configureMeter(meas.I, "current", pickCurrentRange(cfg.Levels.IscFull, cfg), cfg);
+    configureMeter(meas.V, "voltage", pickVoltageRange(cfg));
+    configureMeter(meas.I, "current", pickCurrentRange(cfg.Levels.IscFull, cfg));
 
     meas.Enabled = true;
 end
 
-function handle = openMeter(cfg, address, role)
-% The one place a transport is chosen, and on a 617 there is only the one:
-% the rear panel carries an IEEE-488 connector and nothing else.
+function spec = meterSpec(profile, address, range, ranges, zeroCorrect, timeout)
+% Everything one meter needs, in one place. The range list is the one for
+% the function this meter will be asked for and nothing else, so a caller
+% holding a spec never has to work out which of the three lists applies.
+
+    spec = struct( ...
+        'Ddc',         profile, ...
+        'Address',     address, ...
+        'Model',       profile.Model, ...
+        'Label',       profile.Label, ...
+        'Conversion',  profile.Conversion, ...
+        'ZeroCorrect', zeroCorrect, ...
+        'Timeout',     timeout, ...
+        'Range',       range, ...
+        'Ranges',      ranges, ...
+        'Port',        []);
+end
+
+function profile = selectProfile(profiles, model, name)
+% The profiles carry different fields, so they arrive as a cell array and
+% are matched on Model rather than indexed by position.
+
+    for k = 1:numel(profiles)
+        if profiles{k}.Model == model
+            profile = profiles{k};
+            return
+        end
+    end
+
+    known = strings(1, numel(profiles));
+    for k = 1:numel(profiles)
+        known(k) = """" + profiles{k}.Model + """";
+    end
+    error("PVLoad:BadMeterModel", ...
+        "%s is ""%s"". It must be one of %s.", ...
+        name, model, strjoin(known, ", "));
+end
+
+function m = openMeter(spec, role)
+% The one place a transport is chosen. On a 617 there is only the one: the
+% rear panel carries an IEEE-488 connector and nothing else. The 34401A
+% also has an RS-232 port, which VISA reaches as an ASRL resource, so an
+% address is not necessarily GPIB any more.
+%
+% The open port and its profile leave here together. Everything below takes
+% that pair rather than a port and a bench-wide model, which is what lets
+% one sweep run two different instruments.
+%
+% The terminator comes from the profile because the dialects disagree about
+% it. A Keithley reply ends CR LF; a 34401A ends LF alone, and waiting on a
+% pair that never arrives is a timeout on every read.
+
+    m = spec;
+    D = spec.Ddc;
 
     try
-        handle = visadev(address);
-        handle.Timeout = cfg.Dmm.Timeout;
-        % Replies end CR LF and the command parser ignores both, so reads
-        % match the pair and writes send the one LF writeline appends.
-        configureTerminator(handle, "CR/LF", "LF");
+        m.Port = visadev(spec.Address);
+        m.Port.Timeout = spec.Timeout;
+        configureTerminator(m.Port, D.ReadTerm, D.WriteTerm);
+        % A meter can be mid-reading when a fresh session opens, and the
+        % first query then waits on a terminator that has already gone past.
+        % Without this every first read times out.
+        flush(m.Port);
+        if D.Dialect == "scpi" && startsWith(upper(string(spec.Address)), "ASRL")
+            % Over RS-232 the meter comes up in local and ignores the bus
+            % until this arrives. Over GPIB the addressing does it and the
+            % command is not one the meter accepts, so it is sent only here.
+            writeline(m.Port, "SYST:REM");
+        end
     catch openError
         error("PVLoad:MeterOpenFailed", ...
-            "Could not open the %s meter at %s over VISA: %s\n%s", ...
-            role, address, openError.message, availableResources());
+            "Could not open the %s meter (%s) at %s over VISA: %s\n%s", ...
+            role, spec.Label, spec.Address, openError.message, ...
+            availableResources());
     end
 end
 
@@ -1976,60 +2180,130 @@ function text = availableResources()
     end
 end
 
-function word = identifyMeter(handle, role, cfg)
-% There is no *IDN? on either meter. The U0 query returns the machine
-% status word, which opens with the model number and then spells out the
-% front panel setup, so one query identifies the instrument and reports its
-% state. On the 617 the format is 617 F RR C Z N T O B G D Q MM K YY,
-% figure 3-11.
+function word = identifyMeter(m, role)
+% Neither Keithley has *IDN?. The U0 query returns the machine status word,
+% which opens with the model number and then spells out the front panel
+% setup, so one query identifies the instrument and reports its state. On
+% the 617 the format is 617 F RR C Z N T O B G D Q MM K YY, figure 3-11.
+% The 34401A does have *IDN?, whose reply is maker, model, serial and
+% firmware, so the model sits in the middle rather than at the front.
 %
-% The prefix check is what catches DMM_MODEL naming one meter while the
-% address reaches the other, which would otherwise show up as a range
-% number meaning something different from what was intended.
+% Either way the model check is what catches a DMM_*_MODEL naming one meter
+% while the address reaches the other. That matters more now the two need
+% not be the same instrument: the wrong profile would otherwise show up as
+% a range number meaning something different from what was intended.
 
-    D    = cfg.Dmm.Ddc;
-    word = ddcAsk(handle, D.Machine, cfg);
+    D    = m.Ddc;
+    word = meterAsk(m, D.Machine);
 
-    if ~startsWith(word, D.IdPrefix)
+    if D.Dialect == "scpi"
+        found = contains(word, D.IdPrefix);
+    else
+        found = startsWith(word, D.IdPrefix);
+    end
+
+    if ~found
         error("PVLoad:MeterModelMismatch", ...
-            "DMM_MODEL is ""%s"" but the %s meter answered U0 with " + ...
-            """%s"". These instruments open the status word with their " + ...
-            "own model number.", D.Model, role, word);
+            "The %s meter is configured as a %s but answered %s with " + ...
+            """%s"". The model number is in that reply, and it is not " + ...
+            "this one.", role, D.Model, D.Machine, word);
     end
 end
 
-function configureMeter(handle, role, range, cfg)
-% Function and range travel together because an R number means a different
-% range in every function. Then the offset is nulled for the range just
-% selected, then the error queue is read.
+function configureMeter(m, role, range)
+% Function and range travel together in both dialects, for the same reason
+% in each: an R number means a different range in every function, and CONF
+% takes the two as one command. Then the offset is nulled for the range
+% just selected, then the error queue is read.
 
-    D = cfg.Dmm.Ddc;
+    if m.Ddc.Dialect == "scpi"
+        scpiConfigure(m, role, range);
+    else
+        ddcConfigure(m, role, range);
+    end
+
+    zeroCorrect(m);
+    assertMeterHappy(m, role);
+end
+
+function name = rangeSetting(role)
+% Which Part 1 setting a rejected range came from, for the message.
 
     switch role
-        case "voltage"
-            command = D.Volts + sprintf(D.Range, ...
-                rangeCode(range, cfg.Dmm.VRanges, "DMM_V_RANGE"));
-        case "ohms"
-            % The only place autorange is used. A sweep of five decades has
-            % no fixed range that holds it, and unlike the ammeter in a
-            % sweep there is no cell being loaded while the meter hunts.
-            if range > 0
-                command = D.Ohms + sprintf(D.Range, ...
-                    rangeCode(range, cfg.Dmm.RRanges, "DMM_R_RANGE"));
-            else
-                command = D.Ohms + D.AutoRange;
-            end
-        otherwise
-            command = D.Amps + sprintf(D.Range, ...
-                rangeCode(range, cfg.Dmm.IRanges, "DMM_I_RANGE"));
+        case "voltage", name = "DMM_V_RANGE";
+        case "ohms",    name = "DMM_R_RANGE";
+        otherwise,      name = "DMM_I_RANGE";
     end
-
-    ddcTell(handle, command + D.Common);
-    zeroCorrect(handle, cfg);
-    assertMeterHappy(handle, role, cfg);
 end
 
-function zeroCorrect(handle, cfg)
+function node = functionFor(D, role)
+    switch role
+        case "voltage", node = D.Volts;
+        case "ohms",    node = D.Ohms;
+        otherwise,      node = D.Amps;
+    end
+end
+
+function ddcConfigure(m, role, range)
+
+    D  = m.Ddc;
+    fn = functionFor(D, role);
+
+    % Ohms is the only place autorange is used. A sweep of five decades has
+    % no fixed range that holds it, and unlike the ammeter in a sweep there
+    % is no cell being loaded while the meter hunts.
+    if role == "ohms" && range <= 0
+        command = fn + D.AutoRange;
+    else
+        command = fn + sprintf(D.Range, ...
+            rangeCode(range, m.Ranges, rangeSetting(role), m.Label));
+    end
+
+    ddcTell(m.Port, command + D.Common);
+end
+
+function scpiConfigure(m, role, range)
+% One command per line, and the order is not cosmetic: CONF resets
+% integration time, autozero and input impedance to the defaults for the
+% function it selects, so everything that follows has to follow it.
+%
+% The error queue is cleared first so that the SYST:ERR? at the end of
+% configureMeter reports this setup rather than whatever the front panel
+% did before the script opened the port.
+
+    D    = m.Ddc;
+    node = functionFor(D, role);
+    auto = role == "ohms" && range <= 0;
+
+    if auto
+        select = "CONF:" + node;
+    else
+        rangeCode(range, m.Ranges, rangeSetting(role), m.Label);
+        select = sprintf("CONF:%s %g", node, range);
+    end
+
+    meterTell(m, D.Clear);
+    meterTell(m, select);
+
+    if auto
+        meterTell(m, node + ":" + D.AutoRange);
+    end
+
+    for k = 1:numel(D.Common)
+        meterTell(m, D.Common(k));
+    end
+
+    meterTell(m, sprintf("%s:NPLC %g", node, D.Nplc));
+    meterTell(m, sprintf(D.AutoZero, ternary(m.ZeroCorrect, "ON", "OFF")));
+
+    if role == "voltage"
+        % Ammeter and ohmmeter have no use for it, and on the current
+        % function the volts input is not the one being read.
+        meterTell(m, D.HighZ);
+    end
+end
+
+function zeroCorrect(m)
 % 617 manual section 3.10.4. Zero check shorts the input to the ranging
 % amplifier, so the offset has to be captured with it on and then applied
 % with it off: C1, Z1, C0, a conversion apart so each has taken effect
@@ -2039,52 +2313,69 @@ function zeroCorrect(handle, cfg)
 % Zero check is an electrometer facility. A meter without it returns
 % without sending anything at all, rather than sending a bare X, which
 % under T5 would be a trigger and would leave a reading nobody collects
-% sitting in front of the next one.
+% sitting in front of the next one. The 34401A nulls its offset with
+% autozero instead, which scpiConfigure has already asked for.
 
-    D = cfg.Dmm.Ddc;
+    D = m.Ddc;
 
     if ~D.HasZeroCheck
         return
     end
-    if ~cfg.Dmm.ZeroCorrect
-        ddcTell(handle, sprintf(D.ZeroCheck, 0));
+    if ~m.ZeroCorrect
+        ddcTell(m.Port, sprintf(D.ZeroCheck, 0));
         return
     end
 
-    ddcTell(handle, sprintf(D.ZeroCheck, 1) + sprintf(D.ZeroCorr, 0));
-    pause(cfg.Dmm.Conversion);
-    ddcTell(handle, sprintf(D.ZeroCorr, 1));
-    pause(cfg.Dmm.Conversion);
-    ddcTell(handle, sprintf(D.ZeroCheck, 0));
-    pause(cfg.Dmm.Conversion);
+    ddcTell(m.Port, sprintf(D.ZeroCheck, 1) + sprintf(D.ZeroCorr, 0));
+    pause(m.Conversion);
+    ddcTell(m.Port, sprintf(D.ZeroCorr, 1));
+    pause(m.Conversion);
+    ddcTell(m.Port, sprintf(D.ZeroCheck, 0));
+    pause(m.Conversion);
 end
 
-function assertMeterHappy(handle, role, cfg)
-% The U1 query returns the error condition word: the model number and then
-% one digit per error, 617 figure 3-12. Anything but zeros means the meter
-% threw a command back, which on this bench means a letter in the profile
-% at the top of this file is not one it knows. That is the check the 196
-% profile leans on, its letters being unverified.
+function assertMeterHappy(m, role)
+% Whatever a command the meter did not understand cost, it is cheaper to
+% find here than in the CSV. On the Keithleys the U1 query returns the
+% error condition word, the model number and then one digit per error, 617
+% figure 3-12; anything but zeros is a rejected command. On the 34401A
+% SYST:ERR? pops one entry off the error queue and a clean one reads +0.
+%
+% This is the check the two unverified profiles lean on. A letter or a
+% keyword that is not one the instrument knows becomes an error at
+% configuration rather than a wrong number later.
 
-    D     = cfg.Dmm.Ddc;
-    word  = ddcAsk(handle, D.Error, cfg);
-    flags = extractAfter(word, D.IdPrefix);
+    D    = m.Ddc;
+    word = meterAsk(m, D.Error);
 
-    if ismissing(flags) || strlength(flags) == 0 || any(char(flags) ~= '0')
+    if D.Dialect == "scpi"
+        happy = startsWith(word, D.NoError);
+    else
+        flags = extractAfter(word, D.IdPrefix);
+        happy = ~ismissing(flags) && strlength(flags) > 0 && ...
+                all(char(flags) == '0');
+    end
+
+    if ~happy
         error("PVLoad:MeterRejectedSetup", ...
-            "The %s meter answered U1 with ""%s"".", role, word);
+            "The %s meter (%s) answered %s with ""%s"".", ...
+            role, m.Label, D.Error, word);
     end
 end
 
-function code = rangeCode(range, ranges, name)
-% R1 is the most sensitive range of a function and they climb by decades,
-% so the R number is a position in the list. Table 3-12.
+function code = rangeCode(range, ranges, name, label)
+% On the Keithleys R1 is the most sensitive range of a function and they
+% climb by decades, so the R number is a position in the list, table 3-12.
+% The 34401A names the range as a number instead and has no use for the
+% position, but it still wants the same check: a range the instrument does
+% not have is a configuration error here rather than something the meter
+% quietly rounds up later.
 
     code = find(abs(ranges - range) <= 1e-9 * ranges, 1);
     if isempty(code)
         error("PVLoad:BadMeterRange", ...
-            "%s is %g. The 617 has %s.", ...
-            name, range, strjoin(string(ranges), ", "));
+            "%s is %g. The %s has %s.", ...
+            name, range, label, strjoin(string(ranges), ", "));
     end
 end
 
@@ -2093,22 +2384,24 @@ function range = pickCurrentRange(iscExpected, cfg)
 % not per point: a range change costs a fresh zero correction, and 769 of
 % those per level would be absurd.
 %
-% Autorange exists, as R0, and is not used. A range hunt inside a settled
-% point spends conversions on the wrong range, and the answer it would
-% arrive at is already known from ISC_FULL.
+% Autorange exists and is not used. A range hunt inside a settled point
+% spends conversions on the wrong range, and the answer it would arrive at
+% is already known from ISC_FULL.
 
-    if cfg.Dmm.IRange > 0
-        range = cfg.Dmm.IRange;
+    I = cfg.Dmm.I;
+
+    if I.Range > 0
+        range = I.Range;
         return
     end
     if isnan(iscExpected) || iscExpected <= 0
-        range = max(cfg.Dmm.IRanges);
+        range = max(I.Ranges);
         return
     end
 
-    fits = cfg.Dmm.IRanges(cfg.Dmm.IRanges >= 1.2 * iscExpected);
+    fits = I.Ranges(I.Ranges >= 1.2 * iscExpected);
     if isempty(fits)
-        range = max(cfg.Dmm.IRanges);
+        range = max(I.Ranges);
     else
         range = min(fits);
     end
@@ -2117,17 +2410,19 @@ end
 function range = pickVoltageRange(cfg)
 % Voc does not move with illumination the way Isc does, so this is settled
 % once rather than per level. Sizing it from VOC_FULL rather than naming a
-% number keeps one configuration working on both meters, whose ranges are
-% decades apart: 20 V on a 617 is 30 V on a 196.
+% number keeps one configuration working on every meter, whose ranges do
+% not line up: 20 V on a 617 is 30 V on a 196 and 100 V on a 34401A.
 
-    if cfg.Dmm.VRange > 0
-        range = cfg.Dmm.VRange;
+    V = cfg.Dmm.V;
+
+    if V.Range > 0
+        range = V.Range;
         return
     end
 
-    fits = cfg.Dmm.VRanges(cfg.Dmm.VRanges >= cfg.Levels.VocFull);
+    fits = V.Ranges(V.Ranges >= cfg.Levels.VocFull);
     if isempty(fits)
-        range = max(cfg.Dmm.VRanges);
+        range = max(V.Ranges);
     else
         range = min(fits);
     end
@@ -2137,14 +2432,18 @@ function meas = setCurrentRange(meas, iscExpected, cfg)
     if ~meas.Enabled
         return
     end
-    configureMeter(meas.I, "current", pickCurrentRange(iscExpected, cfg), cfg);
+    configureMeter(meas.I, "current", pickCurrentRange(iscExpected, cfg));
 end
 
 function [volts, amps, fault] = readPoint(meas, cfg)
 % Both meters are triggered before either reply is collected, so the two
-% conversions overlap. T5 makes the X that ends a command the trigger, and
-% K2 stops the 617 holding the bus off until that conversion finishes,
-% which is what lets the second trigger leave while the first is running.
+% conversions overlap. Each dialect gets there its own way, and with two
+% different instruments on the bench both ways can be in use at once. On a
+% Keithley, T5 makes the X that ends a command the trigger and K2 stops the
+% meter holding the bus off until that conversion finishes, which is what
+% lets the second trigger leave while the first is running. On the 34401A
+% the two are separate commands to begin with: INIT starts a conversion
+% into memory and returns, and FETC? collects it afterwards.
 %
 % A timeout returns NaN rather than throwing: one dropped reading in 769 is
 % a lost row, and aborting an hour-long sweep over a bus hiccup is worse.
@@ -2159,19 +2458,61 @@ function [volts, amps, fault] = readPoint(meas, cfg)
 
     try
         if cfg.Dmm.Parallel
-            ddcTell(meas.V, "");
-            ddcTell(meas.I, "");
-            volts = k617Decode(readline(meas.V));
-            amps  = k617Decode(readline(meas.I));
+            meterTrigger(meas.V);
+            meterTrigger(meas.I);
+            volts = meterFetch(meas.V);
+            amps  = meterFetch(meas.I);
         else
-            volts = k617Decode(ddcAsk(meas.V, "", cfg));
-            amps  = k617Decode(ddcAsk(meas.I, "", cfg));
+            volts = meterReadOnce(meas.V);
+            amps  = meterReadOnce(meas.I);
         end
     catch
         fault = true;
     end
 
     fault = fault || isnan(volts) || isnan(amps);
+end
+
+function meterTrigger(m)
+% Start a conversion and return without waiting for it. A bare X under T5
+% on a Keithley, INIT on the 34401A.
+
+    if m.Ddc.Dialect == "scpi"
+        writeline(m.Port, m.Ddc.Trigger);
+    else
+        ddcTell(m.Port, "");
+    end
+end
+
+function value = meterFetch(m)
+% Collect the reading a previous meterTrigger started. The Keithleys send
+% it unasked once the conversion ends; the 34401A holds it in memory until
+% FETC? asks.
+
+    if m.Ddc.Dialect == "scpi"
+        value = meterDecode(m, meterAsk(m, m.Ddc.Fetch));
+    else
+        value = meterDecode(m, readline(m.Port));
+    end
+end
+
+function value = meterReadOnce(m)
+% Trigger and collect as one exchange, for the path where nothing is
+% overlapped.
+
+    if m.Ddc.Dialect == "scpi"
+        value = meterDecode(m, meterAsk(m, m.Ddc.Read));
+    else
+        value = meterDecode(m, ddcAsk(m, ""));
+    end
+end
+
+function value = meterDecode(m, reply)
+    if m.Ddc.Dialect == "scpi"
+        value = scpiDecode(reply, m.Ddc.Overflow);
+    else
+        value = k617Decode(reply);
+    end
 end
 
 function value = k617Decode(reply)
@@ -2200,20 +2541,67 @@ function value = k617Decode(reply)
     value = str2double(extractAfter(text, strlength(prefix)));
 end
 
-function ddcTell(handle, command)
+function value = scpiDecode(reply, overflow)
+% A 34401A reading is the number and nothing else, so unlike the Keithley
+% decoder there is no prefix to demand and anything unparseable has to
+% carry the whole check. str2double gives NaN for that, which is what the
+% caller counts as a fault.
+%
+% Overflow is not a status letter here either: the meter returns 9.9E37 for
+% a reading past full scale, which is a perfectly valid number and would
+% otherwise land in the CSV as one.
+%
+% Takes a string, not a port, so captured replies can drive it offline.
+
+    value = str2double(strtrim(string(reply)));
+
+    if abs(value) >= overflow
+        value = NaN;
+    end
+end
+
+function meterTell(m, command)
+% Send a command that produces no reply, in whichever dialect this meter
+% speaks.
+
+    if m.Ddc.Dialect == "scpi"
+        writeline(m.Port, command);
+    else
+        ddcTell(m.Port, command);
+    end
+end
+
+function reply = meterAsk(m, command)
+% Send a command that does produce one, and insist on it. Both dialects
+% answer a setting command with nothing at all, so routing a set through
+% here turns every successful write into a timeout.
+
+    if m.Ddc.Dialect == "scpi"
+        writeline(m.Port, command);
+        reply = strtrim(string(readline(m.Port)));
+        if strlength(reply) == 0
+            error("PVLoad:MeterNoReply", ...
+                "No reply to ""%s"" within %g s.", command, m.Timeout);
+        end
+    else
+        reply = ddcAsk(m, command);
+    end
+end
+
+function ddcTell(port, command)
 % Nothing happens on a 617 until an X arrives, so every command leaves
 % through here and every one of them gets one. An empty command is a bare
 % X, which under T5 is a trigger and nothing else.
 
-    writeline(handle, command + "X");
+    writeline(port, command + "X");
 end
 
-function reply = ddcAsk(handle, command, cfg)
-    ddcTell(handle, command);
-    reply = strtrim(string(readline(handle)));
+function reply = ddcAsk(m, command)
+    ddcTell(m.Port, command);
+    reply = strtrim(string(readline(m.Port)));
     if strlength(reply) == 0
         error("PVLoad:MeterNoReply", ...
-            "No reply to ""%sX"" within %g s.", command, cfg.Dmm.Timeout);
+            "No reply to ""%sX"" within %g s.", command, m.Timeout);
     end
 end
 
@@ -2222,8 +2610,14 @@ function closeMeters(meas)
     if ~isstruct(meas)
         return
     end
-    quietly(@() delete(meas.V));
-    quietly(@() delete(meas.I));
+    quietly(@() closePort(meas.V));
+    quietly(@() closePort(meas.I));
+end
+
+function closePort(m)
+    if isstruct(m)
+        delete(m.Port);
+    end
 end
 
 

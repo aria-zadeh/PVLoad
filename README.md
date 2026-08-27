@@ -113,7 +113,7 @@ map, SPI command format, initialization requirements, timing, and BOM with part 
 |---|---|
 | Board | MATLAB R2019a+, MATLAB Support Package for Arduino Hardware, Arduino Uno, 24 V bench supply |
 | Amplifier | Thorlabs EDFA100P, USB driver, interlock shorted |
-| Meters | Two Keithley 617 electrometers or two Keithley 196 system DMMs, USB-GPIB adapter, Instrument Control Toolbox, vendor VISA runtime |
+| Meters | Two of: Keithley 617 electrometer, Keithley 196 system DMM, Agilent 34401A multimeter. They need not be the same model. USB-GPIB adapter, Instrument Control Toolbox, vendor VISA runtime |
 
 No firmware to compile. The support package ships its own, and SPI transactions are issued from the
 host over USB.
@@ -123,17 +123,34 @@ Libraries separately, matching the vendor to your GPIB adapter. Without one, `vi
 `Unable to find VISA installations`; with one and no instruments attached it reports `Unable to
 find any VISA resources`.
 
-`DMM_MODEL` selects the instrument. Both the Keithley 617 electrometer and the Keithley 196 system
-DMM speak the same device-dependent command language, and the differences between them live in one
-profile each at the top of Part 2: which letter selects which function, what ranges exist, and
-whether the meter has zero check. The 196 profile has not been checked against its manual. Its
-letters are inferred from the family, and what protects a run is that the setup string is followed
-by the error query, so a command the meter does not know fails at configuration rather than
-producing a wrong number.
+`DMM_V_MODEL`, `DMM_I_MODEL`, and `DMM_R_MODEL` select the instrument for each meter, from `"617"`,
+`"196"`, and `"34401A"`. The model is named per meter rather than once for the bench, so the
+voltmeter and the ammeter can be different instruments. One profile per model at the top of Part 2
+holds what differs: which command selects which function, what ranges exist, whether the meter has
+zero check, and how a reading is decoded. Each meter carries its own profile from the moment it is
+opened, so a sweep can run a 196 on volts and a 34401A on amps.
+
+The Keithley 617 electrometer and the Keithley 196 system DMM speak the same device-dependent
+command language, where a command is a letter and a number and nothing takes effect until an `X`
+arrives. The Agilent 34401A is SCPI, so its commands are words, one per line, and a reading is a
+bare number with no prefix. Each profile carries a dialect, and the functions that talk to the bus
+branch on it.
+
+Neither the 196 profile nor the 34401A profile has been checked against its manual on this bench.
+What protects a run is that the setup is followed by the error query, so a command the meter does
+not know fails at configuration rather than producing a wrong number.
 
 The 617 has an IEEE-488 interface and nothing else, so it requires a USB-GPIB adapter. Match the
 adapter to the installed VISA: NI-VISA drives National Instruments hardware, Keysight IO Libraries
-drive Keysight hardware.
+drive Keysight hardware. The 34401A also has an RS-232 port, which VISA reaches as an `ASRL`
+resource; the script sends `SYST:REM` on that transport only, because GPIB addressing does the same
+job and the command is not valid there.
+
+On Windows, Keysight VISA can fail inside MATLAB while working in every other program. MATLAB loads
+the copy of `MSVCP140.dll` it ships in `bin\win64` in preference to the system copy, and if that copy
+is older than the runtime Keysight IO Libraries was built against, the Keysight VISA library fails to
+initialise. `instrhwinfo('visa')` then omits `keysight` and `visadevlist` finds nothing.
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) has the diagnosis and the fix.
 
 ## Setup
 
@@ -195,7 +212,7 @@ hardware.
 | `SERIAL_PORT`, `EDFA_PORT` | COM ports; enumerate with `serialportlist("available")` |
 | `DMM_V_ADDRESS`, `DMM_I_ADDRESS` | VISA resource strings; enumerate with `visadevlist` |
 | `DMM_R_ADDRESS` | VISA resource string of the single meter `"ohms"` uses; that mode ignores `DMM_ENABLED` |
-| `DMM_MODEL` | `"617"` or `"196"`; selects the command profile and range lists |
+| `DMM_V_MODEL`, `DMM_I_MODEL`, `DMM_R_MODEL` | `"617"`, `"196"`, or `"34401A"` per meter; selects the command profile and range lists. They need not match |
 | `DMM_V_RANGE`, `DMM_I_RANGE`, `DMM_R_RANGE` | Fixed meter ranges, or 0 to size from `VOC_FULL`, `ISC_FULL`, and autorange |
 | `EDFA_ENABLED`, `DMM_ENABLED` | Which subsystems are attached |
 | `ISC_FULL`, `VOC_FULL`, `POWER_FULL` | Approximate cell behavior; sizes meter ranges and prints estimates. Only `ISC_FULL` and `VOC_FULL` past a range are errors |
@@ -204,6 +221,7 @@ hardware.
 | `EDFA_CURRENT_LIMIT` | Pump current ceiling; device maximum is 1000 mA |
 | `EDFA_WARMUP` | Hold at first level, in seconds |
 | `RAMP_STEPS`, `RAMP_DWELL` | States visited by `"ramp"` and how long each state is held |
+| `DMM_NPLC`, `DMM_LINE_HZ` | Integration time in power line cycles, and the mains frequency that turns it into seconds. 34401A only |
 | `WIPER_CODES` | Codes `"wiper"` compares at |
 | `OHMS_SETTLE` | Per-state hold in `"ohms"` before the reading is triggered |
 | `SETTLE_TIME` | Per-state hold when no meters are attached |
@@ -211,7 +229,9 @@ hardware.
 
 The 617 has no integration-time setting, so there is nothing to trade between noise and speed. A
 conversion takes 365 ms or 780 ms depending on function and range, which fixes the run time. The 196
-does have a resolution setting, and its profile asks for 5.5 digits. Both meters are triggered
+does have a resolution setting, and its profile asks for 5.5 digits. The 34401A integrates for
+`DMM_NPLC` power line cycles, doubled when `DMM_ZERO_CORRECT` is set because autozero takes a zero
+reading between measurements. Both meters are triggered
 before either reply is read, so a point costs one conversion rather than two, and a 769-state level
 takes about six minutes. `RUN = "plan"` prints the estimate for a given
 configuration.
@@ -255,8 +275,8 @@ The output is two files under `OUT_DIR`, sharing one timestamp: `pvload_<stamp>_
 per state, and `pvload_<stamp>_ohms.png` plotting measured resistance against the model on log axes,
 with the ratio of the two below it. A ratio of 1 is agreement.
 
-Neither meter reaches the bottom of the sweep: the lowest ohms range is 2 kΩ on the 617 and 300 Ω on
-the 196, against a 0.150 Ω `SHORT` contact. `DMM_R_RANGE` therefore defaults to the instrument's own
+No meter reaches the bottom of the sweep: the lowest ohms range is 2 kΩ on the 617, 300 Ω on the
+196, and 100 Ω on the 34401A, against a 0.150 Ω `SHORT` contact. `DMM_R_RANGE` therefore defaults to the instrument's own
 autorange, and the low end is measured on the coarsest part of the most sensitive range. Points the
 meter returns as zero or negative stay in the CSV and are counted on the console rather than plotted.
 A reading carries the leads, the jacks and the traces exactly as a handheld does, so a constant few
@@ -327,20 +347,30 @@ state is a Voc reading rather than a loaded one.
 time rather than measured on a saturated range. The range is named per level and never autoranged,
 because a range hunt inside a settled point spends conversions on the wrong range.
 
-**The three notes above are the 617's.** A 196 is a 6.5 digit DMM rather than an electrometer: its
-current ranges start at 3 mA instead of 2 pA, it reads current across a shunt and so carries a real
-burden voltage, and its volts input is megohms rather than hundreds of teraohms. A ~16 mA cell fits
-its 30 mA range, but the divider and burden arguments have to be redone from its own specifications
-before a sweep taken on one is trusted. An `ISC_FULL` far below the meter's lowest range is a warning
-at configuration time, not an error.
+**The three notes above are the 617's.** The 196 and the 34401A are 6.5 digit DMMs rather than
+electrometers, and the same three arguments come out differently on them. Current ranges start at
+3 mA on the 196 and 10 mA on the 34401A rather than 2 pA, and both read current across a shunt, so
+burden voltage is tens of millivolts rather than three. A ~16 mA cell lands on the 196's 30 mA range
+and the 34401A's 100 mA range. An `ISC_FULL` far below the meter's lowest range is a warning at
+configuration time, not an error.
+
+**Input impedance on a DMM voltmeter.** Both DMMs present megohms rather than hundreds of teraohms,
+and against the 470 kΩ `OPEN` path that is a divider rather than a rounding error. A 10 MΩ input
+reads Voc about 4.5% low. The 34401A can be told otherwise: `INP:IMP:AUTO ON` raises it past 10 GΩ
+and the script sends that on the voltmeter, but only the 100 mV, 1 V, and 10 V ranges honour it, so
+a `VOC_FULL` that pushes the meter onto 100 V puts the divider back. The 196 has no equivalent
+command, and its 30 V and 300 V ranges are 10 MΩ. Nothing in the configuration warns about either
+case. With a mixed pair, put the 34401A on volts and the 196 on amps unless the `OPEN` point does
+not matter.
 
 **Isc.** Three millivolts of burden and the 0.150 Ω relay contact put the `SHORT` state near 5 mV
 rather than at 0 V. Voltage is measured at every point, so `SHORT` is the lowest-voltage point on
 the curve rather than a point defined to be at zero. Isc is obtained by extrapolating to V = 0.
 
-Device-dependent commands are collected in one profile per instrument in Part 2, selected by
-`DMM_MODEL`. The dialect is Keithley's own rather than SCPI, so it belongs to this instrument family
-and does not port beyond it.
+Instrument commands are collected in one profile per model in Part 2, selected per meter by
+`DMM_V_MODEL`, `DMM_I_MODEL`, and `DMM_R_MODEL`.
+Two dialects are supported: Keithley's own device-dependent command language, which does not port
+beyond that family, and SCPI.
 
 ## Safety
 

@@ -53,7 +53,7 @@ The instrument answers, and it is the 196:
 | `U1X` | `196000000000000000000000000` |
 | bare read | `NDCV-000.0001E+0` |
 
-`U0` opens with the model number, which agrees with `DMM_MODEL = "196"` and with
+`U0` opens with the model number, which agrees with `DMM_R_MODEL = "196"` and with
 `DMM_R_ADDRESS`. `U1` is all zeros after the prefix, so nothing is latched. The
 reading is DC volts at −0.1 mV, which is the meter sitting on its own leads.
 
