@@ -81,55 +81,42 @@ are in the digital group nearest the USB socket, <span class="mono">D6</span> an
 <p class="note">J3 carries two or three things at once. Use a stacking banana plug; a jack with leads
 jammed alongside each other reads tens of ohms and drifts.</p>
 
-<h2>3 &nbsp; Instrument cables and what to set in software</h2>
+<h2>3 &nbsp; Instrument cables</h2>
 <table>
-<tr><th style="width:23%">Instrument</th><th style="width:37%">Cable to the PC</th><th>Set in Part 1 of <span class="mono">PVLoad_Main.m</span></th></tr>
+<tr><th style="width:26%">Instrument</th><th>Cable, and what has to be set on the instrument itself</th></tr>
 <tr>
   <td><b>Arduino Uno</b></td>
-  <td>USB-A to USB-B (printer cable), straight to the laptop.</td>
-  <td><span class="mono">SERIAL_PORT = "COM4"</span><br><span class="note">List them with <span class="mono">serialportlist("available")</span></span></td>
+  <td>USB-A to USB-B (printer cable), straight to the laptop. Nothing to set.</td>
 </tr>
 <tr>
   <td><b>Keithley 617</b><br>&times;2</td>
-  <td><b>IEEE-488 (GPIB) only &mdash; no USB, no serial.</b> Needs a
-      <b>USB-GPIB adapter</b>; match it to the installed VISA, which is NI-VISA, so use NI
-      hardware (e.g. GPIB-USB-HS). One adapter serves both: GPIB connectors stack, so run an
-      IEEE-488 cable adapter &rarr; meter 1, and a second cable meter 1 &rarr; meter 2.</td>
-  <td><span class="mono">DMM_ENABLED = true</span><br>
-      <span class="mono">DMM_V_ADDRESS = "GPIB0::22::INSTR"</span><br>
-      <span class="mono">DMM_I_ADDRESS = "GPIB0::23::INSTR"</span><br>
-      <span class="note">Each meter needs its own primary address, set from its front panel
-      (IEEE program; default is 27). Confirm with <span class="mono">visadevlist</span>.</span></td>
+  <td><b>IEEE-488 (GPIB) only &mdash; no USB, no serial port.</b> Each needs a
+      <b>USB-GPIB adapter</b>, matched to the VISA installed on the laptop, which is National
+      Instruments. One adapter serves both meters: IEEE-488 connectors stack, so run a cable from the
+      adapter to the first meter and a second cable from the first meter to the second.
+      <br><br>
+      <b>Set a different primary address on each meter</b> from its front panel before connecting
+      them. They all ship at 27, so two on one bus will collide. Use <b>22 for the volts meter</b> and
+      <b>23 for the amps meter</b>.</td>
 </tr>
 <tr>
   <td><b>617 inputs</b></td>
   <td>Front-panel triaxial <span class="mono">INPUT</span>, through a triax-to-dual-banana adapter.
       HI is the centre conductor, LO the inner shield.</td>
-  <td><span class="mono">DMM_V_RANGE = 20</span> (V)<br>
-      <span class="mono">DMM_I_RANGE = 0</span> &rarr; picked per level from <span class="mono">ISC_FULL</span></td>
 </tr>
 <tr>
   <td><b>Thorlabs<br>EDFA100P</b></td>
-  <td>Plain USB cable. It enumerates as a <b>virtual COM port</b> &mdash; no adapter needed.
-      115200&nbsp;8N1, CR terminator, all already in the file.</td>
-  <td><span class="mono">EDFA_ENABLED = true</span><br>
-      <span class="mono">EDFA_PORT = "COM5"</span><br>
-      <span class="note">Rear interlock must be shorted or it will not enable.</span></td>
+  <td>Plain USB cable &mdash; no adapter. It enumerates as a virtual COM port.
+      <br><br>
+      <b>The rear interlock must be shorted</b> or the amplifier will not enable.</td>
+</tr>
+<tr>
+  <td><b>24 V supply</b></td>
+  <td>Two banana leads to J2 and J3. Set 24.0 V and a current limit of about 100 mA.</td>
 </tr>
 </table>
-
-<h2>4 &nbsp; Which mode to run</h2>
-<table>
-<tr><th style="width:22%">Setup</th><th style="width:26%"><span class="mono">RUN =</span></th><th>Purpose</th></tr>
-<tr><td>Handheld only</td><td><span class="mono">"verify"</span></td><td>Seven holds; checks both chips, all three relays, both ladders and R1</td></tr>
-<tr><td>Handheld only</td><td><span class="mono">"ramp"</span></td><td>Walks the sweep slowly enough to follow on a handheld</td></tr>
-<tr><td>Two 617s</td><td><span class="mono">"meters"</span></td><td>Identify both meters, configure, take ten readings</td></tr>
-<tr><td>EDFA only</td><td><span class="mono">"edfa"</span></td><td>Identify, report temperature, ramp the pump</td></tr>
-<tr><td>Everything</td><td><span class="mono">"sweep"</span></td><td>Full experiment, written to CSV</td></tr>
-</table>
-<p class="note">Each mode opens only what it needs. <span class="mono">"board"</span>, <span class="mono">"ramp"</span>,
-<span class="mono">"verify"</span> and <span class="mono">"k3"</span> touch no laser and no meters;
-<span class="mono">"edfa"</span> touches no board; <span class="mono">"meters"</span> touches neither.</p>
+<p class="note">Every port and address above has a matching setting at the top of
+<span class="mono">PVLoad_Main.m</span>, described in the comments there.</p>
 </div>
 
 <!-- ================= PAGE 2 ================= -->
@@ -255,11 +242,6 @@ sources almost nothing, so blocking the light is equivalent to unplugging it and
 meter is a piece of wire and you would be shorting J1 to J3.
 </div>
 
-<h3>Software</h3>
-<p><span class="mono">EDFA_ENABLED = false</span> &nbsp;&middot;&nbsp; <span class="mono">DMM_ENABLED = false</span>
-&nbsp;&middot;&nbsp; <span class="mono">RUN = "verify"</span> to check the board, or <span class="mono">"ramp"</span>
-to watch the whole range.</p>
-
 <h3>Power order for this setup</h3>
 <p><b>Up:</b> 24 V output on &rarr; Arduino USB in &rarr; run.&nbsp;&nbsp;
    <b>Down:</b> stop &rarr; Arduino USB out &rarr; 24 V output off.<br>
@@ -319,19 +301,17 @@ cable runs meter to meter rather than back to the PC.</p>
 
 <h3>Before this works</h3>
 <ul>
-  <li>Give each 617 its own <b>primary address</b> from its front panel. They default to 27, which collides.
-      The file expects 22 for volts and 23 for amps &mdash; change the meters or change the file.</li>
-  <li>Confirm both appear: <span class="mono">visadevlist</span>. With no instruments attached it raises
-      <span class="mono">unableToFindResourcesDefaultTimeout</span>, which is the healthy empty-bench answer.
-      &ldquo;Unable to find VISA <b>installations</b>&rdquo; is the broken one and means NI-VISA is missing.</li>
-  <li><span class="mono">DMM_ENABLED = true</span>, <span class="mono">RUN = "meters"</span>.</li>
+  <li>Each 617 must be on its own <b>primary address</b>, set from its front panel. They default to
+      27, which collides. Use 22 for volts and 23 for amps.</li>
+  <li>The USB-GPIB adapter must be the same brand as the VISA runtime on the laptop. Mixing them is
+      the usual reason nothing is found.</li>
+  <li>Let the meters warm up before trusting a reading.</li>
 </ul>
 
 <h3>What it proves</h3>
-<p>Both meters answer <span class="mono">U0</span> with a status word starting <span class="mono">617</span>,
-accept their setup string, return a clean <span class="mono">U1</span> error word, and deliver ten readings.
-That covers the adapter, the cable, the addresses and the command dialect &mdash; everything except the
-measurement wiring, which Wiring 3 adds.</p>
+<p>That the adapter, the cables and the two addresses are all good, and that the laptop can identify
+each meter, configure it and read from it. Everything except the measurement wiring, which Wiring 3
+adds.</p>
 
 <div class="warn">
 <b>Absolute maximum on the 617 volts input is 250 V peak.</b> The amps function stops at 20 mA and there
@@ -342,7 +322,7 @@ is nothing above it; a cell that outruns 20 mA needs an external shunt.
 <!-- ================= PAGE 5 ================= -->
 <div class="page">
 <h1>Wiring 3 &nbsp;&middot;&nbsp; Full experiment</h1>
-<p class="sub">PV cell, both 617s, EDFA100P, 24 V supply, board. This is <span class="mono">RUN = "sweep"</span>.</p>
+<p class="sub">PV cell, both 617s, EDFA100P, 24 V supply, board. Everything connected at once.</p>
 
 <h3>3a &nbsp; The measurement loop</h3>
 <svg viewBox="0 0 720 330" xmlns="http://www.w3.org/2000/svg">
@@ -458,23 +438,6 @@ J1 and J3. Downstream of the ammeter it reads low by the burden drop. On a 617 t
 every range except 20 mA, where it is 3 mV, so it no longer swamps the Isc end &mdash; but the rule is unchanged.
 </div>
 
-<h3>Software</h3>
-<p><span class="mono">RUN = "sweep"</span> &nbsp;&middot;&nbsp; <span class="mono">EDFA_ENABLED = true</span>
-&nbsp;&middot;&nbsp; <span class="mono">DMM_ENABLED = true</span> &nbsp;&middot;&nbsp;
-<span class="mono">SERIAL_PORT</span>, <span class="mono">EDFA_PORT</span>,
-<span class="mono">DMM_V_ADDRESS</span>, <span class="mono">DMM_I_ADDRESS</span> all set.</p>
-<p>Enter the cell's real numbers in <span class="mono">ISC_FULL</span>, <span class="mono">VOC_FULL</span> and
-<span class="mono">POWER_FULL</span> &mdash; they size the ammeter range and print the estimate. An
-<span class="mono">ISC_FULL</span> above 20 mA is refused, because the 617 has no range above it.</p>
-<p>For <span class="mono">LEVEL_MODE = "power"</span> the calibration arrays
-<span class="mono">CAL_CURRENT_MA</span> and <span class="mono">CAL_POWER_MW</span> must be filled from a
-measured pump-current-to-optical-power sweep. Outside their measured range the script refuses rather
-than extrapolating.</p>
-
-<h3>Output</h3>
-<p><span class="mono">pvload_&lt;stamp&gt;.csv</span> for per-point readings and
-<span class="mono">pvload_&lt;stamp&gt;_levels.csv</span> for what is constant across a level, appended one
-level at a time so an abort keeps every completed level. Nothing is ever overwritten.</p>
 </div>
 
 </body>

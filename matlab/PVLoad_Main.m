@@ -24,8 +24,23 @@ clc;
 RUN = "ramp";  
 
 
-% to find com ports: serialportlist("available")
-% to find meter addresses: visadevlist
+% Ports and addresses, and what each one needs on the bench. Wiring and the
+% power sequence are in docs/PVLoad_BenchCard.pdf, which is meant to be
+% printed; only the parts that reach this file are repeated here.
+%
+%   SERIAL_PORT   Arduino over a USB-B cable, nothing to set on it.
+%                 serialportlist("available") lists what is attached.
+%   EDFA_PORT     the amplifier's own USB, which enumerates as a virtual COM
+%                 port, so no adapter. its rear interlock has to be shorted
+%                 or it will not enable, whatever this file asks for.
+%   DMM_*_ADDRESS the 617 has an IEEE-488 connector and nothing else, so it
+%                 needs a USB-GPIB adapter matched to the installed VISA,
+%                 which here is NI. one adapter carries both meters: the
+%                 connectors stack, so the second cable runs meter to meter
+%                 rather than back to the laptop. give each meter its own
+%                 primary address from its front panel first, because they
+%                 all ship on 27 and two of those collide. visadevlist
+%                 confirms them.
 
 SERIAL_PORT = "COM4";                % Arduino com port
 
