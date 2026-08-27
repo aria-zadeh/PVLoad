@@ -189,11 +189,18 @@ debug once two TSSOP packages are soldered down.
   previous reading, every point is lagged by one state and the curve is shifted
   rather than wrong-looking. Check it at bring-up by stepping between two widely
   separated load states; `DMM_PARALLEL = false` is the fallback.
-- The 34401A profile is read off manual 34401-90004 but has not been run against
-  the instrument. `RUN = "meters"` tests it, and `SYST:ERR?` after configuration
-  is the guard. The one thing worth checking first is that `FETC?` waits for the
-  conversion `INIT` started rather than returning stale data, which is what the
-  overlapped read depends on.
+- The 34401A profile has now had readings come back from it. `RUN = "meters"`
+  identifies it, configures it and takes ten. What that run did not settle is
+  whether `FETC?` waits for the conversion `INIT` started rather than returning
+  stale data, since with no source every reading is the same number either way.
+  That is what the overlapped read depends on and it is still assumed.
+- Three faults came out of that bring-up and `docs/BRINGUP.md` records them. The
+  one worth carrying forward is not any of the three individually: it is that a
+  flush which cleared the output buffer discarded the setup string, so the error
+  query came back clean because nothing had reached the meter, and the run
+  printed ten plausible readings with the ammeter still in DC volts. The guard
+  passed by throwing away the thing it was guarding. Front panels are worth
+  looking at.
 - The 34401A's volts input is 10 Mohm unless `INP:IMP:AUTO ON` raises it, and
   the manual is explicit that `CONFigure` turns that back off, so it is sent
   after the range on every configuration rather than once. It only reaches the
