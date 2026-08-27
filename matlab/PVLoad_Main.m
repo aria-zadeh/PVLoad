@@ -1,7 +1,7 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % TO STOP: press Ctrl-C ONCE and wait about three seconds.
 %
-% The cleanup handler turns the pump off and returns the board to OPEN. 
+% The cleanup handler returns the board to OPEN. 
 % Pressing it a second time can interrupt that handler.
 
 clear;
@@ -17,11 +17,10 @@ clc;
 %   "k3"      board only, four holds that say whether K3 closes
 %   "verify"  board only, seven holds that between them exercise every
 %             part of the board. the check for a freshly built one.
-%   "ohms"    board and one electrometer on ohms across J1 and J3. every
+%   "ohms"    board and one meter on ohms across J1 and J3. every
 %             state in the sweep is measured, written to CSV and plotted.
-%             no cell, no amplifier, one meter.
-%   "edfa"    amplifier only
-%   "meters"  electrometers only
+%             no cell, one meter.
+%   "meters"  both sweep meters only
 %   "sweep"   the full experiment, written to CSV
 
 RUN = "ohms";  
@@ -33,9 +32,6 @@ RUN = "ohms";
 %
 %   SERIAL_PORT   Arduino over a USB-B cable, nothing to set on it.
 %                 serialportlist("available") lists what is attached.
-%   EDFA_PORT     the amplifier's own USB, which enumerates as a virtual COM
-%                 port, so no adapter. its rear interlock has to be shorted
-%                 or it will not enable, whatever this file asks for.
 %   DMM_*_ADDRESS neither meter has anything but an IEEE-488 connector,
 %                 so each needs a USB-GPIB adapter matched to the VISA,
 %                 which here is Keysight. one adapter carries both meters: the
@@ -47,9 +43,6 @@ RUN = "ohms";
 
 SERIAL_PORT = "COM4";                % Arduino com port
 
-EDFA_ENABLED  = false;               % set to true if laser enabled
-EDFA_PORT     = "COM5";              % amplifier port
-
 DMM_ENABLED   = false;               % set to true if both sweep meters are
                                      % attached. the DMM_*_MODEL settings in
                                      % part 2 say which instrument each one
@@ -60,63 +53,29 @@ DMM_I_ADDRESS = "GPIB0::23::INSTR";  % meter in series with PV+
 DMM_R_ADDRESS = "GPIB0::1::INSTR";  % the one meter RUN "ohms" uses, on
                                      % ohms across J1 and J3. that mode
                                      % ignores DMM_ENABLED, so a bench with
-                                     % a single electrometer runs it with
-                                     % the sweep meters still switched off.
+                                     % one meter free runs it with the sweep
+                                     % meters still switched off.
 
 
 
 
-% roughly what your cell does at POWER_FULL. sizes the ammeter range and
-% prints estimates only, never enters a result, so rough is fine. the one
-% place it is not advisory is the top of the ammeter: an ISC_FULL above the
-% highest range the configured meter has is refused rather than measured
-% badly. On a 617 that ceiling is 20 mA.
-
-ISC_FULL   = 0.016;        % A, short-circuit current at POWER_FULL
-VOC_FULL   = 9;            % V, open-circuit voltage at POWER_FULL
-POWER_FULL = 100;          % mW, the power those two were seen at
-
-
-% the amplifier sets pump current, not power, so measure the relation once.
-% entry k of one array is the power at entry k of the other.
-% fill with RUN = "edfa": step the current, record the power meter.
-% 10-15 points, denser near the threshold knee. both must increase.
-% leave empty and use LEVEL_MODE "current" until measured.
-
-CAL_CURRENT_MA = [];       % pump current, mA
-CAL_POWER_MW   = [];       % optical power at that current, mW
-
-%   CAL_CURRENT_MA = [ 100  150  200  250  300  400  500  600];
-%   CAL_POWER_MW   = [0.05  0.8  4.1  9.6   18   42   72  105];
-
-
-% LEVEL_MODE reads LEVEL_VALUES as:
-%   "current"  pump currents in mA, no calibration needed
-%   "power"    optical powers in mW, looked up in the arrays above
-%   "table"    ignores LEVEL_VALUES, uses every calibration point
+% roughly what your cell does under the illumination you will run it at.
+% sizes the meter ranges and prints estimates only, never enters a result,
+% so rough is fine. the one place it is not advisory is the top of the
+% ammeter: an ISC_FULL above the highest range the configured meter has is
+% refused rather than measured badly.
 %
-% LEVEL_SPACING:
-%   "list"     take the values literally
-%   "linear"   read as [min max], generate LEVEL_COUNT points
-%   "log"      same but logarithmic. use this for power: Voc goes as
-%              log(P), so linear spacing crowds levels where nothing moves
+% illumination itself is not this script's business. set the lamp by hand,
+% run the sweep, change the lamp, run it again; each run writes its own
+% timestamped CSV and RUN_TAG is how you tell them apart afterwards.
 
-LEVEL_MODE    = "table";
-LEVEL_SPACING = "list";
-LEVEL_VALUES  = [300 450 600];
-LEVEL_COUNT   = 8;              % only for linear/log spacing
-LEVEL_ORDER   = "ascend";       % sweep dim to bright
-
-EDFA_CURRENT_LIMIT = 600;       % mA. device max is 1000. a level above
-                                % this is refused, not clamped.
-EDFA_WARMUP        = 900;       % s at the first level. 900 is the 15 min
-                                % the stability spec is quoted after.
-                                % 0 for a quick test.
+ISC_FULL = 0.016;          % A, short-circuit current under that light
+VOC_FULL = 9;              % V, open-circuit voltage under that light
 
 
-% the 617 converts on a fixed schedule, so there is no integration time to
-% trade against speed and nothing here to tune. a level costs about six
-% minutes; RUN "plan" prints the estimate for the levels configured.
+
+% a sweep costs about six minutes; RUN "plan" prints the estimate before
+% anything is opened.
 
 SETTLE_TIME  = 0.20;       % s per state with no meters. ignored once
                            % DMM_ENABLED, which computes the hold instead.
@@ -147,7 +106,9 @@ WIPER_CODES = [0 255];
 
 WRITE_CSV = true;
 OUT_DIR   = "../data/sweep_data";
-RUN_TAG   = "";            % added to the file names, e.g. "cell3"
+RUN_TAG   = "";            % added to the file names. this is where the
+                           % illumination goes, since nothing else records
+                           % it. e.g. "cell3_lamp60"
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -190,132 +151,66 @@ R_CONTACT    = 0.150;      % ohms, reed contact resistance, maximum
 R_OPEN_PATH  = 470e3;      % ohms, R1
 
 
-% EDFA100P protocol, manual TTN118382-D02 Rev C sections 7.2 and 7.3.
 
-EDFA_BAUD       = 115200;
-EDFA_TERMINATOR = "CR";
-EDFA_TIMEOUT    = 2.0;     % s, deadline for one reply
-EDFA_QUIET_GAP  = 0.06;    % s of silence that ends a reply
-EDFA_PROMPT     = "<";     % emitted on power up and after every command
-
-EDFA_MAX_CURRENT  = 1000;  % mA, the device limit. not a setting.
-EDFA_RAMP_STEP    = 50;    % mA per ramp step
-EDFA_RAMP_DWELL   = 0.25;  % s between ramp steps
-EDFA_ENABLE_DELAY = 4.0;   % s. manual specifies about 3 s to output.
-EDFA_LEVEL_SETTLE = 10.0;  % s after a current change. this is the cell
-                           % reaching thermal equilibrium, not the
-                           % amplifier. unmeasured.
-EDFA_TEMP_TARGET  = [];    % degC, or [] to leave the unit's own target
-                           % alone. the operator may have set it.
-EDFA_TEMP_TOL     = 0.5;   % degC that temp? may differ from target?
-EDFA_VERIFY       = true;  % query every setting back after writing it
-
-
-% meters. Three instruments are supported:
+% meters. Two instruments are on the bench and both are 6.5 digit DMMs
+% rather than electrometers, so neither has zero check and both read
+% current across a shunt:
 %
-%   "617"     Keithley 617 programmable electrometer.
-%   "196"     Keithley 196 system DMM. A 6.5 digit meter, not an
-%             electrometer, so it has no zero check and its current ranges
-%             start far above the 617's.
-%   "34401A"  Agilent 34401A. Also 6.5 digits, and the same trade as the
-%             196: no electrometer front end, amps starting at 10 mA. What
-%             it adds is an integration time to set and a switchable high
-%             impedance input.
+%   "196"     Keithley 196 system DMM. Amps start at 3 mA, and there is no
+%             integration time to set.
+%   "34401A"  Agilent 34401A. Amps start at 10 mA. What it adds is an
+%             integration time and a switchable high impedance input, which
+%             is what makes it the better of the two as a voltmeter.
 %
 % The model is named per meter rather than once, because a bench is stocked
 % with whatever it has and the voltmeter and the ammeter need not be the
 % same instrument. Each meter carries its own profile from the moment it is
 % opened, so a sweep can run a 196 on volts and a 34401A on amps.
 %
-% The two Keithleys predate SCPI and speak the same shape of language: a
-% command is a letter and a number, several of them travel in one string,
-% and none of them do anything until an X arrives. The 34401A is SCPI, so
-% commands are words, one per line, and a reading is a bare number with no
-% prefix in front of it. Nothing above the transport is shared between the
-% two dialects, so each profile below carries a Dialect and the handful of
-% functions that talk to the bus branch on it.
+% The 196 predates SCPI: a command is a letter and a number, several of
+% them travel in one string, and none of them do anything until an X
+% arrives. The 34401A is SCPI, so commands are words, one per line, and a
+% reading is a bare number with no prefix in front of it. Nothing above the
+% transport is shared between the two dialects, so each profile below
+% carries a Dialect and the handful of functions that talk to the bus
+% branch on it.
 
-DMM_V_MODEL      = "196";          % "617", "196" or "34401A", per meter.
+DMM_V_MODEL      = "196";          % "196" or "34401A", per meter.
 DMM_I_MODEL      = "34401A";       % the sweep's two, and then the single
 DMM_R_MODEL      = "196";          % meter RUN "ohms" opens
 DMM_TIMEOUT      = 10;             % s, must exceed one conversion
-DMM_ZERO_CORRECT = true;           % null a range's own offset when it is
-                                   % set. the 617 does it with zero check,
-                                   % the 34401A with autozero, which costs
-                                   % a second conversion per reading. the
-                                   % 196 has neither and ignores this.
+DMM_ZERO_CORRECT = true;           % null the meter's own offset. 34401A
+                                   % only, where it is autozero and costs a
+                                   % second conversion per reading. the 196
+                                   % has nothing equivalent and ignores it.
 DMM_NPLC         = 10;             % power line cycles per conversion.
                                    % 34401A only: 0.02, 0.2, 1, 10 or 100.
-                                   % 10 is the 6.5 digit setting. the two
-                                   % Keithleys convert on a fixed schedule
-                                   % and ignore this.
+                                   % 10 is the 6.5 digit setting. the 196
+                                   % converts on a fixed schedule and
+                                   % ignores this.
 DMM_LINE_HZ      = 60;             % mains frequency, which is what turns
                                    % DMM_NPLC into seconds
 DMM_V_RANGE      = 0;              % V, or 0 to pick the smallest range
                                    % that holds VOC_FULL
-DMM_I_RANGE      = 0;              % A, or 0 to pick per level from ISC_FULL
+DMM_I_RANGE      = 0;              % A, or 0 to size it from ISC_FULL
 DMM_R_RANGE      = 0;              % ohm, or 0 for the meter's own
                                    % autorange. the sweep covers five
                                    % decades, so no one fixed range holds
                                    % it and autorange is the default. a
-                                   % fixed range is better where it fits:
-                                   % on the 617 the zero correction belongs
-                                   % to one range, and autoranging leaves
-                                   % it on whichever range it was taken on.
+                                   % fixed range is better where it fits,
+                                   % autoranging costing a hunt at every
+                                   % state that changes decade.
 DMM_PARALLEL     = true;           % trigger both meters, then collect both
 DMM_MAX_FAULTS   = 5;              % consecutive read failures before abort
 
-% Keithley 617, manual 617-901-01 Rev G, section 3.10.
+% Keithley 196 system DMM, manual 196-901-01 Rev D, section 3.9. Every
+% letter and range below is off a page of it: functions from 3.9.2, ranges
+% from table 3-9, the rest from the device-dependent command summary,
+% table 3-8.
 %
-% Range takes the R number, which is a position in the range lists. Common
-% is everything independent of function and range, in order: baseline
-% suppression off, display the electrometer and not the voltage source,
-% read the electrometer and not the buffer, data store off, voltage source
-% output off, send the prefix that flags an overflowed reading, clear the
-% SRQ mask, stop holding the bus off until X has finished, and convert once
-% per X. Those last two are what let two meters run at the same time.
-% ddcTell appends the X, so nothing here carries one.
-DDC_617 = struct( ...
-    'Model',      "617", ...
-    'Label',      "Keithley 617", ...
-    'Dialect',    "ddc", ...
-    'ReadTerm',   "CR/LF", ...
-    'WriteTerm',  "LF", ...
-    'IdPrefix',   "617", ...
-    'Volts',      "F0", ...
-    'Amps',       "F1", ...
-    'Ohms',       "F2", ...
-    'Range',      "R%d", ...
-    'AutoRange',  "R0", ...
-    'ZeroCheck',  "C%d", ...
-    'ZeroCorr',   "Z%d", ...
-    'HasZeroCheck', true, ...
-    'Common',     "N0D0B0Q7O0G0M0K2T5", ...
-    'Machine',    "U0", ...
-    'Error',      "U1", ...
-    'Conversion', 0.40, ...
-    'VRanges',    [0.2 2 20 200], ...
-    'IRanges',    [2e-12 2e-11 2e-10 2e-9 2e-8 2e-7 2e-6 2e-5 ...
-                   2e-4 2e-3 2e-2], ...
-    'RRanges',    [2e3 2e4 2e5 2e6 2e7 2e8 2e9 2e10 2e11]);
-%   Volts ranges R1 to R4, 250 V peak whatever the range. Amps ranges R1 to
-%   R11, table 3-12, 20 mA at the top and nothing above it. Ohms R1 to R9,
-%   2 kohm upwards by decades. Conversion is 365 ms or 780 ms by function
-%   and range, table 3-15; there is no integration time to set.
-
-% Keithley 196 system DMM.
-%
-% NOT VERIFIED AGAINST THE MANUAL. Every number and letter in this profile
-% is from the family's shared command style, not from a page reference, and
-% the 196 manual is not in the repo. Check it before trusting a reading.
-% What protects a run in the meantime is that the setup string is followed
-% by the U1 error query, so a letter this meter does not know is an error
-% at configuration rather than a wrong number in the CSV.
-%
-% Two differences from the 617 are structural rather than cosmetic. Amps is
-% F3, because F1 and F2 are the AC functions the 617 does not have. And
-% there is no zero check: C is an electrometer command, so the 617's
-% C1/Z1/C0 sequence is not sent and DMM_ZERO_CORRECT does nothing here.
+% Amps is F3 rather than F1, F1 and F2 being the AC functions. There is no
+% zero check, that being an electrometer facility, so DMM_ZERO_CORRECT does
+% nothing on this meter.
 DDC_196 = struct( ...
     'Model',      "196", ...
     'Label',      "Keithley 196", ...
@@ -328,29 +223,35 @@ DDC_196 = struct( ...
     'Ohms',       "F2", ...
     'Range',      "R%d", ...
     'AutoRange',  "R0", ...
-    'ZeroCheck',  "", ...
-    'ZeroCorr',   "", ...
-    'HasZeroCheck', false, ...
     'Common',     "Z0B0G0M0K2S2T5", ...
     'Machine',    "U0", ...
     'Error',      "U1", ...
-    'Conversion', 0.35, ...
+    'Conversion', 0.024, ...
     'VRanges',    [0.3 3 30 300], ...
-    'IRanges',    [3e-3 3e-2 3e-1 3], ...
+    'IRanges',    [3e-4 3e-3 3e-2 3e-1 3], ...
     'RRanges',    [300 3e3 3e4 3e5 3e6 3e7 3e8]);
-%   Common in order: relative off, so a REL left on the front panel cannot
-%   offset every reading; buffer off; send the prefix that flags an
-%   overflow; SRQ mask cleared; no bus hold-off; 5.5 digit resolution,
-%   which is what the conversion figure above assumes; and convert once per
-%   X. Ranges are the 3 / 30 / 300 decades this family uses.
-
-% Agilent 34401A, manual 34401-90004, chapter 4.
+%   Common in order, table 3-8: relative off, so a REL left on the front
+%   panel cannot offset every reading; readings from the A/D rather than
+%   the buffer; send the prefix that flags an overflow; SRQ mask cleared;
+%   EOI on and bus hold-off off, which is what lets the second meter be
+%   triggered while this one is converting; 5.5 digit resolution; and
+%   convert once per X.
 %
-% NOT VERIFIED AGAINST THE MANUAL ON THIS BENCH. The commands are ordinary
-% SCPI and the range lists are the published ones, but nothing here has
-% been run against the instrument. The SYST:ERR? query after every setup is
-% what catches a command it does not know, the same guard the 196 profile
-% leans on.
+%   Ranges are R1 upward by decades, table 3-9: volts 300 mV to 300 V,
+%   amps 300 uA to 3 A, ohms 300 ohm to 300 Mohm. Note that amps starts a
+%   decade below the 3 mA a 6.5 digit DMM is usually assumed to stop at.
+%
+%   Conversion is 24 ms, table 3-16, which is the trigger to reading-ready
+%   time at S2. The integration period itself is one line cycle; the rest
+%   is the bus. S3 would be 106 ms for one more digit.
+
+% Agilent 34401A, manual 34401-90004. Ranges are chapter 1, the input
+% resistance rule is chapter 3 under Measurement Configuration, and the
+% shunt values are the DC Characteristics table in chapter 8.
+%
+% NOT RUN AGAINST THE INSTRUMENT YET. The commands are ordinary SCPI read
+% off the manual, but no reading has come back from this meter. The
+% SYST:ERR? query after every setup is what catches one it does not know.
 %
 % Volts, Amps and Ohms are the SCPI function nodes rather than letters.
 % They serve twice: CONF:<node> <range> selects function and range in one
@@ -374,7 +275,6 @@ SCPI_34401A = struct( ...
     'Amps',       "CURR:DC", ...
     'Ohms',       "RES", ...
     'AutoRange',  "RANG:AUTO ON", ...
-    'HasZeroCheck', false, ...
     'Common',     ["TRIG:SOUR IMM", "TRIG:DEL AUTO", ...
                    "TRIG:COUN 1", "SAMP:COUN 1"], ...
     'AutoZero',   "ZERO:AUTO %s", ...
@@ -398,16 +298,19 @@ SCPI_34401A = struct( ...
 %   command and range overhead, doubled when autozero is on because the
 %   meter takes a zero reading between every measurement.
 %
-%   HighZ is sent on the voltmeter only. The 34401A's DC volts input is
-%   10 Mohm unless this is set, and 10 Mohm across the 470 kohm OPEN path
-%   is a divider that reads Voc about 4.5% low. INP:IMP:AUTO ON raises it
-%   past 10 Gohm, but only on the 100 mV, 1 V and 10 V ranges: a VOC_FULL
-%   that pushes the meter onto 100 V puts the divider back.
+%   HighZ is sent on the voltmeter only, and it has to be sent after the
+%   CONF: the manual is explicit that CONFigure and MEASure? turn
+%   INP:IMP:AUTO back off. The DC volts input is 10 Mohm until it is set,
+%   and 10 Mohm across the 470 kohm OPEN path is a divider that reads Voc
+%   about 4.5% low. AUTO ON raises it past 10 Gohm, but only on the
+%   100 mV, 1 V and 10 V ranges: a VOC_FULL that pushes the meter onto
+%   100 V puts the divider back. The setting is volatile, so it is sent
+%   every time the meter is configured rather than once.
 
-% One profile per meter rather than one for the bench. The three lists carry
+% One profile per meter rather than one for the bench. The two lists carry
 % different fields, so they travel in a cell array rather than a struct
 % array, and selectProfile matches on the Model field.
-PROFILES = {DDC_617, DDC_196, SCPI_34401A};
+PROFILES = {DDC_196, SCPI_34401A};
 
 DDC_V = selectProfile(PROFILES, DMM_V_MODEL, "DMM_V_MODEL");
 DDC_I = selectProfile(PROFILES, DMM_I_MODEL, "DMM_I_MODEL");
@@ -425,9 +328,14 @@ WIPER_SETTLE  = 0.001;     % s after a wiper-only change. the pot settles
                            % in ~1 us; this is the SPI round trip.
 SETTLE_SAFETY = 1.5;       % covers USB jitter and pause() granularity
 RC_TAU_COUNT  = 7;         % time constants. e^-7 is 0.09%.
-C_LOAD        = 300e-12;   % F, dominated by the leads. the 617 puts
-                           % 20 pF of it across the load.
+C_LOAD        = 300e-12;   % F, dominated by the leads and the meter
+                           % input.
 CELL_SETTLE   = 0;         % s for the cell's own junction capacitance.
+
+CSV_CHUNK     = 64;        % states written to disk at a time. writetable
+                           % reopens the file per call, so a row at a time
+                           % is far too slow and the whole run at the end
+                           % loses everything on an abort.
                            % unmeasured, and the term that could actually
                            % matter. to find it: park at OPEN, take 50
                            % readings and see where they stop moving.
@@ -465,36 +373,9 @@ cfg = struct( ...
     'RContact',      R_CONTACT, ...
     'ROpenPath',     R_OPEN_PATH);
 
-cfg.Levels = struct( ...
-    'Mode',       LEVEL_MODE, ...
-    'Spacing',    LEVEL_SPACING, ...
-    'Values',     LEVEL_VALUES, ...
-    'Count',      LEVEL_COUNT, ...
-    'Order',      LEVEL_ORDER, ...
-    'CalCurrentMa', CAL_CURRENT_MA(:), ...
-    'CalPowerMw',   CAL_POWER_MW(:), ...
-    'IscFull',    ISC_FULL, ...
-    'PowerFull',  POWER_FULL, ...
-    'VocFull',    VOC_FULL);
-
-cfg.Edfa = struct( ...
-    'Enabled',      EDFA_ENABLED, ...
-    'Port',         EDFA_PORT, ...
-    'Baud',         EDFA_BAUD, ...
-    'Terminator',   EDFA_TERMINATOR, ...
-    'Timeout',      EDFA_TIMEOUT, ...
-    'QuietGap',     EDFA_QUIET_GAP, ...
-    'Prompt',       EDFA_PROMPT, ...
-    'MaxCurrent',   EDFA_MAX_CURRENT, ...
-    'CurrentLimit', EDFA_CURRENT_LIMIT, ...
-    'RampStep',     EDFA_RAMP_STEP, ...
-    'RampDwell',    EDFA_RAMP_DWELL, ...
-    'EnableDelay',  EDFA_ENABLE_DELAY, ...
-    'Warmup',       EDFA_WARMUP, ...
-    'LevelSettle',  EDFA_LEVEL_SETTLE, ...
-    'TempTarget',   EDFA_TEMP_TARGET, ...
-    'TempTol',      EDFA_TEMP_TOL, ...
-    'Verify',       EDFA_VERIFY);
+cfg.Cell = struct( ...
+    'IscFull', ISC_FULL, ...
+    'VocFull', VOC_FULL);
 
 % Each meter gets one spec holding everything about it: its profile, where
 % it lives, which range list applies to the function it will be asked for,
@@ -526,7 +407,8 @@ cfg.Timing = struct( ...
 cfg.Out = struct( ...
     'WriteCsv', WRITE_CSV, ...
     'Dir',      OUT_DIR, ...
-    'Tag',      RUN_TAG);
+    'Tag',      RUN_TAG, ...
+    'Chunk',    CSV_CHUNK);
 
 assertConfig(cfg);
 
@@ -538,7 +420,6 @@ switch cfg.Run
     case "k3",     runK3Check(cfg);
     case "verify", runVerify(cfg);
     case "ohms",   runOhmsSweep(cfg);
-    case "edfa",   runEdfaCheck(cfg);
     case "meters", runMeterCheck(cfg);
     case "sweep",  results = runSweepAll(cfg);
 end
@@ -550,15 +431,14 @@ end
 
 function runPlanOnly(cfg)
 
-    plan   = buildSweepPlan(cfg);
-    levels = buildPowerPlan(cfg, loadCalibration(cfg));
-    reportPlan(cfg, plan, levels);
-    fprintf("\nNothing was opened. Set RUN to board, edfa, meters or " + ...
-        "sweep to use hardware.\n");
+    plan = buildSweepPlan(cfg);
+    reportPlan(cfg, plan);
+    fprintf("\nNothing was opened. Set RUN to board, meters or sweep to " + ...
+        "use hardware.\n");
 end
 
 function runBoardCheck(cfg)
-% Arduino and PCB only, so SPI and the relays can be proved with no laser
+% Arduino and PCB only, so SPI and the relays can be proved with no cell
 % and no meters in the way.
 
     plan  = buildSweepPlan(cfg);
@@ -811,8 +691,8 @@ function runK3Check(cfg)
 end
 
 function runOhmsSweep(cfg)
-% Board and one electrometer, with the meter on ohms across J1 and J3 and
-% no cell in the loop. Every state in the sweep is visited once and the
+% Board and one meter, on ohms across J1 and J3 and with no cell in the
+% loop. Every state in the sweep is visited once and the
 % meter reads the load directly, so the resistance comes off an instrument
 % instead of off the model.
 %
@@ -824,7 +704,7 @@ function runOhmsSweep(cfg)
 %
 % One meter, so DMM_ENABLED stays out of it: that flag says whether the
 % pair the sweep needs is attached, and this mode needs neither of them in
-% particular. It touches no laser.
+% particular.
 
     plan  = buildSweepPlan(cfg);
 
@@ -1044,45 +924,6 @@ function k = findState(plan, mode, code, cfg)
     end
 end
 
-function runEdfaCheck(cfg)
-% Amplifier only. This is the laser bring-up, so it touches nothing else.
-
-    if ~cfg.Edfa.Enabled
-        error("PVLoad:EdfaDisabled", ...
-            "RUN is ""edfa"" but EDFA_ENABLED is false.");
-    end
-
-    levels = buildPowerPlan(cfg, loadCalibration(cfg));
-    edfa   = connectEdfa(cfg);
-    guard  = onCleanup(@() quietly(@() edfaShutdown(edfa, true)));
-
-    fprintf("target  %.2f degC\n", edfaNumber(edfa, "target"));
-    fprintf("temp    %.2f degC\n", edfaNumber(edfa, "temp"));
-    fprintf("current %.0f mA\n",   edfaNumber(edfa, "current"));
-    fprintf("on      %d\n",        edfaIsOn(edfa));
-
-    fprintf("\nEnabling. Output is live from here.\n");
-    edfaSet(edfa, "enable", 1);
-    pause(cfg.Edfa.EnableDelay);
-    if ~edfaIsOn(edfa)
-        error("PVLoad:EdfaWillNotEnable", ...
-            "The amplifier did not turn on. The rear interlock must be " + ...
-            "shorted before it will enable.");
-    end
-
-    for k = 1:numel(levels)
-        edfaRampTo(edfa, levels(k).CurrentMa);
-        fprintf("  %s -> readback %.0f mA, %.2f degC\n", ...
-            describeLevel(levels(k)), edfaNumber(edfa, "current"), ...
-            edfaNumber(edfa, "temp"));
-        pause(cfg.Edfa.LevelSettle);
-    end
-
-    edfaShutdown(edfa, false);
-    clear guard;
-    fprintf("\nAmplifier OK. Pump at zero and disabled.\n");
-end
-
 function runMeterCheck(cfg)
 % Meters only, so the command dialect and the wiring can be checked before
 % a sweep depends on them.
@@ -1095,7 +936,7 @@ function runMeterCheck(cfg)
     meas  = connectMeters(cfg);
     guard = onCleanup(@() quietly(@() closeMeters(meas)));
 
-    setCurrentRange(meas, cfg.Levels.IscFull, cfg);
+    setCurrentRange(meas, cfg.Cell.IscFull, cfg);
 
     fprintf("\nOne conversion takes about %.0f ms on the voltmeter and " + ...
         "%.0f ms on the ammeter.\n", ...
@@ -1113,30 +954,27 @@ function runMeterCheck(cfg)
 end
 
 function results = runSweepAll(cfg)
+% One sweep at whatever illumination the bench happens to be under. The
+% lamp is set by hand and the script never touches it, so a family of
+% curves is several runs of this rather than one run of several levels.
+% RUN_TAG is the only record of which was which.
 
-    cal    = loadCalibration(cfg);
-    plan   = buildSweepPlan(cfg);
-    levels = buildPowerPlan(cfg, cal);
-
-    reportPlan(cfg, plan, levels);
+    plan = buildSweepPlan(cfg);
+    reportPlan(cfg, plan);
 
     board = connectBoard(cfg);
     fprintf("Board connected.\n");
 
-    edfa = connectEdfa(cfg);
     meas = connectMeters(cfg);
-    log  = openLog(cfg, levels);
+    log  = openLog(cfg, numel(plan));
 
-    results = runExperiment(board, edfa, meas, plan, levels, cfg, log);
+    results = runExperiment(board, meas, plan, cfg, log);
 
-    fprintf("\nRun complete. %d level(s) x %d states.\n", ...
-        numel(levels), numel(plan));
-    if ~isempty(log.Readings)
+    fprintf("\nRun complete. %d states.\n", numel(plan));
+    if strlength(log.Readings) > 0
         fprintf("Readings: %s\n", log.Readings);
-        fprintf("Levels:   %s\n", log.Levels);
     end
 end
-
 
 %% =====================================================================
 %  Sweep planning
@@ -1199,15 +1037,15 @@ end
 
 
 %% =====================================================================
-%  Illumination planning
+%  Validation and planning
 %  =====================================================================
 
 function assertConfig(cfg)
 % Catches a mistyped config block before anything is energised.
 
     mustBeOneOf(cfg.Run, ...
-        ["plan" "board" "ramp" "wiper" "k3" "verify" "ohms" "edfa" ...
-         "meters" "sweep"], "RUN");
+        ["plan" "board" "ramp" "wiper" "k3" "verify" "ohms" "meters" ...
+         "sweep"], "RUN");
 
     if cfg.RampSteps < 2 || cfg.RampSteps > 769
         error("PVLoad:BadRampSteps", ...
@@ -1226,31 +1064,6 @@ function assertConfig(cfg)
         error("PVLoad:BadWiperCodes", ...
             "WIPER_CODES must be whole numbers from 0 to %d, which is the " + ...
             "range of a FULL code sum.", 2 * cfg.WiperSteps);
-    end
-
-    L = cfg.Levels;
-    mustBeOneOf(L.Mode,    ["current" "power" "table"], "LEVEL_MODE");
-    mustBeOneOf(L.Spacing, ["list" "linear" "log"],     "LEVEL_SPACING");
-    mustBeOneOf(L.Order,   ["ascend" "descend"],        "LEVEL_ORDER");
-
-    if L.Spacing ~= "list" && numel(L.Values) ~= 2
-        error("PVLoad:BadLevelRange", ...
-            "LEVEL_SPACING ""%s"" reads LEVEL_VALUES as [min max], " + ...
-            "but it has %d elements.", L.Spacing, numel(L.Values));
-    end
-
-    E = cfg.Edfa;
-    if E.CurrentLimit > E.MaxCurrent
-        error("PVLoad:CurrentLimitTooHigh", ...
-            "EDFA_CURRENT_LIMIT is %g mA but the device maximum is %g mA.", ...
-            E.CurrentLimit, E.MaxCurrent);
-    end
-    if E.RampStep <= 0
-        error("PVLoad:BadRampStep", "EDFA_RAMP_STEP must be positive.");
-    end
-    if E.Enabled && cfg.SerialPort == E.Port
-        error("PVLoad:PortConflict", ...
-            "The Arduino and the amplifier are both set to %s.", E.Port);
     end
 
     D = cfg.Dmm;
@@ -1287,32 +1100,32 @@ function assertConfig(cfg)
     if D.R.Range > 0
         rangeCode(D.R.Range, D.R.Ranges, "DMM_R_RANGE", D.R.Label);
     end
-    if D.Enabled && cfg.Levels.VocFull > max([D.V.Range, max(D.V.Ranges)])
+    if D.Enabled && cfg.Cell.VocFull > max([D.V.Range, max(D.V.Ranges)])
         error("PVLoad:VocAboveMeterRange", ...
             "VOC_FULL is %g V and the highest volts range the %s has is " + ...
             "%g V, so the OPEN point would overflow.", ...
-            cfg.Levels.VocFull, D.V.Label, max(D.V.Ranges));
+            cfg.Cell.VocFull, D.V.Label, max(D.V.Ranges));
     end
-    if D.Enabled && D.V.Range > 0 && cfg.Levels.VocFull > D.V.Range
+    if D.Enabled && D.V.Range > 0 && cfg.Cell.VocFull > D.V.Range
         error("PVLoad:VocAboveMeterRange", ...
             "VOC_FULL is %g V but DMM_V_RANGE is %g V, so the OPEN point " + ...
             "would overflow. Set it to 0 to size the range from VOC_FULL.", ...
-            cfg.Levels.VocFull, D.V.Range);
+            cfg.Cell.VocFull, D.V.Range);
     end
-    if D.Enabled && cfg.Levels.IscFull > max(D.I.Ranges)
+    if D.Enabled && cfg.Cell.IscFull > max(D.I.Ranges)
         error("PVLoad:IscAboveMeterRange", ...
             "ISC_FULL is %g A and the %s stops at %g A. Nothing in the " + ...
             "instrument goes higher, so the cell has to be measured " + ...
-            "through a shunt or at a lower illumination.", ...
-            cfg.Levels.IscFull, D.I.Label, max(D.I.Ranges));
+            "through a shunt or under weaker light.", ...
+            cfg.Cell.IscFull, D.I.Label, max(D.I.Ranges));
     end
-    if D.Enabled && cfg.Levels.IscFull > 0 && ...
-       cfg.Levels.IscFull < 0.001 * min(D.I.Ranges)
+    if D.Enabled && cfg.Cell.IscFull > 0 && ...
+       cfg.Cell.IscFull < 0.001 * min(D.I.Ranges)
         warning("PVLoad:IscFarBelowMeterRange", ...
             "ISC_FULL is %g A and the lowest amps range the %s has is " + ...
             "%g A, so the current reading is the bottom of a range. A " + ...
             "6.5 digit DMM is not an electrometer.", ...
-            cfg.Levels.IscFull, D.I.Label, min(D.I.Ranges));
+            cfg.Cell.IscFull, D.I.Label, min(D.I.Ranges));
     end
 end
 
@@ -1344,27 +1157,6 @@ function mustBeOneOf(value, allowed, name)
     end
 end
 
-function cal = loadCalibration(cfg)
-% Empty is not an error: LEVEL_MODE "current" does not need it.
-
-    cal = [];
-    if isempty(cfg.Levels.CalCurrentMa) && isempty(cfg.Levels.CalPowerMw)
-        return
-    end
-
-    if numel(cfg.Levels.CalCurrentMa) ~= numel(cfg.Levels.CalPowerMw)
-        error("PVLoad:CalibrationLengthMismatch", ...
-            "CAL_CURRENT_MA has %d entries and CAL_POWER_MW has %d. Entry " + ...
-            "k of one is the power at entry k of the other, so they have " + ...
-            "to be the same length.", ...
-            numel(cfg.Levels.CalCurrentMa), numel(cfg.Levels.CalPowerMw));
-    end
-
-    cal = struct('CurrentMa', cfg.Levels.CalCurrentMa(:), ...
-                 'PowerMw',   cfg.Levels.CalPowerMw(:), ...
-                 'Path',      "CAL_CURRENT_MA / CAL_POWER_MW");
-end
-
 function path = resolvePath(relative)
 % Resolved against this file's folder, so the current directory does not
 % matter.
@@ -1376,197 +1168,27 @@ function path = resolvePath(relative)
     path = fullfile(here, char(relative));
 end
 
-function assertCalibrationUsable(cal, cfg)
-% Inverted to solve for current, so both arrays must strictly increase.
-% Non-monotonic data means the measurement is wrong, which deserves a
-% human rather than a silent sort.
-
-    if isempty(cal)
-        error("PVLoad:NoCalibration", ...
-            "LEVEL_MODE ""%s"" needs the calibration arrays, but " + ...
-            "CAL_CURRENT_MA and CAL_POWER_MW at the top of this file are " + ...
-            "empty. Measure them, or use LEVEL_MODE ""current"" to give " + ...
-            "pump currents directly.", cfg.Levels.Mode);
-    end
-    if numel(cal.CurrentMa) < 2
-        error("PVLoad:CalibrationTooShort", ...
-            "CAL_CURRENT_MA has %d entry. At least 2 are needed to " + ...
-            "interpolate between.", numel(cal.CurrentMa));
-    end
-
-    checkIncreasing(cal.CurrentMa, "CAL_CURRENT_MA");
-    checkIncreasing(cal.PowerMw,   "CAL_POWER_MW");
-
-    bad = cal.CurrentMa < 0 | cal.CurrentMa > cfg.Edfa.MaxCurrent;
-    if any(bad)
-        error("PVLoad:CalibrationOutOfRange", ...
-            "CAL_CURRENT_MA entry %d is %g mA, outside 0 to %g mA.", ...
-            find(bad, 1), cal.CurrentMa(find(bad, 1)), cfg.Edfa.MaxCurrent);
-    end
-end
-
-function checkIncreasing(values, name)
-    k = find(diff(values) <= 0, 1);
-    if ~isempty(k)
-        error("PVLoad:CalibrationNotMonotonic", ...
-            "%s is not strictly increasing: entry %d is %g and entry %d " + ...
-            "is %g. The arrays are inverted to solve for pump current, " + ...
-            "which a non-monotonic one makes ambiguous.", ...
-            name, k, values(k), k + 1, values(k + 1));
-    end
-end
-
-function levels = buildPowerPlan(cfg, cal)
-% The ordered list of illumination levels the sweep is repeated at.
-
-    L = cfg.Levels;
-
-    if ~cfg.Edfa.Enabled
-        levels = makeLevel(1, NaN, NaN, "ambient", cfg);
-        return
-    end
-
-    switch L.Mode
-        case "current"
-            currents = round(expandValues(L, "mA"));
-            powers   = currentToPower(cal, currents);
-            source   = "current";
-
-        case "power"
-            assertCalibrationUsable(cal, cfg);
-            currents = powerToCurrent(cal, expandValues(L, "mW"), cfg);
-            % Report the power the rounded current actually delivers, not
-            % the power that was asked for.
-            powers   = currentToPower(cal, currents);
-            source   = "power";
-
-        case "table"
-            assertCalibrationUsable(cal, cfg);
-            currents = round(cal.CurrentMa);
-            powers   = cal.PowerMw;
-            source   = "table";
-    end
-
-    [currents, keep] = unique(currents, "stable");
-    powers = powers(keep);
-
-    [currents, order] = sort(currents, L.Order);
-    powers = powers(order);
-
-    overLimit = currents > cfg.Edfa.CurrentLimit;
-    if any(overLimit)
-        error("PVLoad:CurrentOverLimit", ...
-            "Level %d needs %g mA but EDFA_CURRENT_LIMIT is %g mA. " + ...
-            "Raise the limit deliberately or drop the level.", ...
-            find(overLimit, 1), currents(find(overLimit, 1)), ...
-            cfg.Edfa.CurrentLimit);
-    end
-
-    levels = repmat(makeLevel(1, currents(1), powers(1), source, cfg), ...
-                    numel(currents), 1);
-    for k = 2:numel(currents)
-        levels(k) = makeLevel(k, currents(k), powers(k), source, cfg);
-    end
-end
-
-function values = expandValues(L, unit)
-
-    switch L.Spacing
-        case "list"
-            values = L.Values(:);
-        case "linear"
-            values = linspace(L.Values(1), L.Values(2), L.Count)';
-        case "log"
-            if any(L.Values <= 0)
-                error("PVLoad:BadLogRange", ...
-                    "LEVEL_SPACING ""log"" needs both endpoints above " + ...
-                    "zero, got [%g %g] %s.", L.Values(1), L.Values(2), unit);
-            end
-            values = logspace(log10(L.Values(1)), log10(L.Values(2)), L.Count)';
-    end
-end
-
-function mA = powerToCurrent(cal, mW, cfg)
-% Linear only: a spline can overshoot non-monotonically and destroy the
-% inverse it is being used to compute. Extrapolation is refused rather
-% than clamped, because guessing an unmeasured laser drive current is not
-% something to do quietly.
-
-    mA = interp1(cal.PowerMw, cal.CurrentMa, mW(:), "linear", NaN);
-
-    bad = find(isnan(mA), 1);
-    if ~isempty(bad)
-        error("PVLoad:PowerOutOfRange", ...
-            "%g mW is outside the calibrated range %g to %g mW covered by " + ...
-            "CAL_POWER_MW. Measure more points rather than extrapolating.", ...
-            mW(bad), min(cal.PowerMw), max(cal.PowerMw));
-    end
-
-    mA = round(mA);          % current=n takes an integer
-    mA = min(mA, cfg.Edfa.MaxCurrent);
-end
-
-function mW = currentToPower(cal, mA)
-% Labelling only, so NaN outside the table is fine.
-    if isempty(cal)
-        mW = nan(size(mA));
-        return
-    end
-    mW = interp1(cal.CurrentMa, cal.PowerMw, mA(:), "linear", NaN);
-end
-
-function level = makeLevel(index, currentMa, powerMw, source, cfg)
-% OpenFraction: the 470 kohm path draws a fixed current while Isc scales
-% with light, so at low power the OPEN point stops being a Voc reading.
-
-    L = cfg.Levels;
-
-    if isnan(powerMw)
-        iscExpected = NaN;
-    else
-        iscExpected = L.IscFull * powerMw / L.PowerFull;
-    end
-
-    % Current drawn through the 470 kohm path at the OPEN point, as a
-    % fraction of the cell's short-circuit current. That current is fixed
-    % while Isc scales with illumination, so at low power the OPEN point
-    % stops being an open-circuit measurement.
-    openFraction = (L.VocFull / cfg.ROpenPath) / iscExpected;
-
-    level = struct( ...
-        'Index',           index, ...
-        'CurrentMa',       currentMa, ...
-        'PowerMw',         powerMw, ...
-        'Source',          string(source), ...
-        'IscExpected',     iscExpected, ...
-        'OpenFraction',    openFraction, ...
-        'CurrentReadback', NaN, ...
-        'TempC',           NaN, ...
-        'IRange',          NaN, ...
-        'Faults',          0, ...
-        'Valid',           true);
-end
-
-function reportPlan(cfg, plan, levels)
+function reportPlan(cfg, plan)
 % Everything needed to decide whether to let it run, before anything opens.
 
     perPoint = estimatePointTime(cfg, plan);
-    settling = numel(levels) * cfg.Edfa.LevelSettle * double(cfg.Edfa.Enabled);
-    warmup   = cfg.Edfa.Warmup * double(cfg.Edfa.Enabled);
-    total    = numel(levels) * perPoint * numel(plan) + settling + warmup;
+    total    = perPoint * numel(plan);
 
     fprintf("Sweep plan: %d load states, %g ohm to %g ohm.\n", ...
         numel(plan), plan(1).Resistance, plan(end).Resistance);
-    fprintf("Illumination: %d level(s).\n", numel(levels));
 
-    for k = 1:numel(levels)
-        fprintf("  %s\n", describeLevel(levels(k)));
-        if levels(k).OpenFraction > 0.05
-            warning("PVLoad:OpenPointWeak", ...
-                "Level %d draws %.1f%% of Isc through the 470 kohm path. " + ...
-                "The OPEN point is not a Voc measurement at this " + ...
-                "illumination.", k, 100 * levels(k).OpenFraction);
-        end
+    % The 470 kohm path draws a fixed current at the OPEN point while Isc
+    % scales with light, so under weak illumination that point stops being
+    % an open-circuit measurement. Nothing here can see the lamp, so this
+    % is checked against ISC_FULL and is only as good as that number.
+    openFraction = (cfg.Cell.VocFull / cfg.ROpenPath) / cfg.Cell.IscFull;
+    fprintf("Cell at the light you will run it under: Isc about %g mA, " + ...
+        "Voc about %g V.\n", 1e3 * cfg.Cell.IscFull, cfg.Cell.VocFull);
+    if openFraction > 0.05
+        warning("PVLoad:OpenPointWeak", ...
+            "The 470 kohm path draws %.1f%% of ISC_FULL. The OPEN point " + ...
+            "is not a Voc measurement at this illumination.", ...
+            100 * openFraction);
     end
 
     if cfg.Dmm.Enabled
@@ -1581,10 +1203,6 @@ function reportPlan(cfg, plan, levels)
 
     fprintf("About %.0f ms per point. Estimated run time %.1f minutes.\n", ...
         1e3 * perPoint, total / 60);
-    if warmup > 0
-        fprintf("  including a %.0f minute warm-up at the first level.\n", ...
-            warmup / 60);
-    end
 end
 
 function t = estimatePointTime(cfg, plan)
@@ -1609,21 +1227,6 @@ function t = estimatePointTime(cfg, plan)
         t = t + reading + 0.02;
     end
 end
-
-function text = describeLevel(level)
-    if isnan(level.CurrentMa)
-        text = "ambient light, amplifier not in use";
-        return
-    end
-    if isnan(level.PowerMw)
-        text = sprintf("level %d: %g mA", level.Index, level.CurrentMa);
-    else
-        text = sprintf("level %d: %g mA, about %.3g mW, Isc about %.3g mA", ...
-            level.Index, level.CurrentMa, level.PowerMw, ...
-            1e3 * level.IscExpected);
-    end
-end
-
 
 %% =====================================================================
 %  Board control
@@ -1789,278 +1392,6 @@ end
 
 
 %% =====================================================================
-%  EDFA100P control
-%  =====================================================================
-%  Serial settings and the command set are from the operating manual,
-%  Thorlabs TTN118382-D02 Rev C, sections 7.2 and 7.3.
-
-function edfa = connectEdfa(cfg)
-
-    edfa = struct('Enabled', false, 'Port', [], 'Id', "", 'Cfg', cfg.Edfa);
-
-    if ~cfg.Edfa.Enabled
-        fprintf("Amplifier disabled. Running one ambient-light sweep.\n");
-        return
-    end
-
-    try
-        port = serialport(cfg.Edfa.Port, cfg.Edfa.Baud);
-    catch openError
-        error("PVLoad:EdfaPortFailed", ...
-            "Could not open %s at %d baud: %s\nPorts available now: %s", ...
-            cfg.Edfa.Port, cfg.Edfa.Baud, openError.message, ...
-            strjoin(cellstr(serialportlist("available")), ", "));
-    end
-
-    configureTerminator(port, cfg.Edfa.Terminator);
-    port.Timeout = cfg.Edfa.Timeout;
-
-    edfa.Port    = port;
-    edfa.Enabled = true;
-
-    % Clear the power-up prompt and anything a previous session left behind,
-    % so the first real query is not answered by stale bytes.
-    flush(port);
-    writeline(port, "");
-    edfaCollect(edfa, 0.5);
-
-    edfa.Id = edfaAsk(edfa, "id?");
-    fprintf("Amplifier: %s\n", edfa.Id);
-
-    edfaAssertReady(edfa, cfg);
-end
-
-function text = edfaCollect(edfa, deadline)
-% readline is the wrong primitive here: the "<" prompt has no terminator
-% after it, so readline would block the full timeout on every prompt.
-% Never throws. An empty return is a distinguishable outcome.
-
-    text  = '';
-    began = tic;
-    quiet = tic;
-
-    while toc(began) < deadline
-        n = edfa.Port.NumBytesAvailable;
-        if n > 0
-            text  = [text, read(edfa.Port, n, "char")];  %#ok<AGROW>
-            quiet = tic;
-            if contains(text, edfa.Cfg.Prompt) && any(text == char(13))
-                break
-            end
-        elseif ~isempty(text) && toc(quiet) > edfa.Cfg.QuietGap
-            break
-        else
-            pause(0.005);
-        end
-    end
-end
-
-function reply = edfaAsk(edfa, query)
-
-    writeline(edfa.Port, query);
-    raw = edfaCollect(edfa, edfa.Cfg.Timeout);
-
-    reply = edfaDecode(raw, query, edfa.Cfg, true);
-end
-
-function edfaTell(edfa, command)
-% A keyword=value command is answered with nothing but a fresh prompt, so
-% silence is success. Only queries demand a reply.
-
-    writeline(edfa.Port, command);
-    raw = edfaCollect(edfa, edfa.Cfg.Timeout);
-
-    edfaDecode(raw, command, edfa.Cfg, false);
-end
-
-function reply = edfaDecode(raw, command, ecfg, requireReply)
-% Kept off the serial port so it can be driven from captured strings.
-% Every guess about this interface lives here.
-
-    text  = regexprep(string(raw), "\r\n?|\n", newline);   % normalise line ends
-    text  = regexprep(text, "<\s*", "");                   % drop every prompt
-    lines = strtrim(split(text, newline));
-    lines(strlength(lines) == 0) = [];
-
-    stem = regexprep(string(command), "[?=].*$", "");
-    lines(strcmpi(lines, command)) = [];                   % full echo
-    lines(startsWith(lines, stem + "?", "IgnoreCase", true) | ...
-          startsWith(lines, stem + "=", "IgnoreCase", true)) = [];   % prefix echo
-
-    failed = contains(lines, "Command error", "IgnoreCase", true) | ...
-             contains(lines, "CMD_NOT_DEFINED", "IgnoreCase", true);
-    if any(failed)
-        error("PVLoad:EdfaCommandError", ...
-            "The amplifier rejected ""%s"": %s", command, lines(find(failed, 1)));
-    end
-
-    if isempty(lines)
-        if ~requireReply
-            reply = "";
-            return
-        end
-        error("PVLoad:EdfaNoReply", ...
-            "No reply to ""%s"" on %s at %d baud within %.1f s. The port " + ...
-            "may be wrong, or the Thorlabs GUI may be holding it open.", ...
-            command, ecfg.Port, ecfg.Baud, ecfg.Timeout);
-    end
-
-    reply = lines(1);
-end
-
-function value = edfaNumber(edfa, keyword)
-    value = edfaParseNumber(edfaAsk(edfa, keyword + "?"), keyword);
-end
-
-function value = edfaParseNumber(reply, keyword)
-% A pattern rather than str2double, so a unit suffix like "450 mA" does
-% not turn the reply into NaN.
-
-    token = regexp(string(reply), "[-+]?\d+(\.\d+)?([eE][-+]?\d+)?", ...
-                   "match", "once");
-
-    % On no match regexp hands back a missing string, not an empty one, and
-    % strlength(missing) is NaN rather than 0. Test for missing first or the
-    % guard silently never fires.
-    if ismissing(token) || strlength(token) == 0
-        error("PVLoad:EdfaNotNumeric", ...
-            "Expected a number from ""%s?"" but got ""%s"".", keyword, reply);
-    end
-    value = str2double(token);
-end
-
-function edfaSet(edfa, keyword, value)
-% Read back after writing, same policy as the wiper registers: a
-% write-only link cannot tell a working amplifier from an unplugged one.
-
-    edfaTell(edfa, sprintf("%s=%d", keyword, round(value)));
-
-    if ~edfa.Cfg.Verify
-        return
-    end
-
-    actual = edfaNumber(edfa, keyword);
-    if abs(actual - value) > 0.5
-        error("PVLoad:EdfaSetFailed", ...
-            "%s did not take: wrote %g, read back %g.", keyword, value, actual);
-    end
-end
-
-function on = edfaIsOn(edfa)
-    on = edfaDecodeStatword(edfaAsk(edfa, "statword?"));
-end
-
-function on = edfaDecodeStatword(reply)
-% The manual's wording is ambiguous between "10000001" and "129". Both
-% are handled, and they agree.
-    token = regexprep(string(reply), "[^0-9A-Za-z]", "");
-
-    if strlength(token) == 8 && all(ismember(char(token), '01'))
-        on = extractAfter(token, 7) == "1";
-    else
-        on = bitand(uint16(str2double(token)), 1) == 1;
-    end
-end
-
-function edfaAssertReady(edfa, cfg)
-
-    if ~isempty(cfg.Edfa.TempTarget)
-        edfaSet(edfa, "target", cfg.Edfa.TempTarget);
-    end
-
-    target = edfaNumber(edfa, "target");
-    actual = edfaNumber(edfa, "temp");
-
-    if abs(actual - target) > cfg.Edfa.TempTol
-        warning("PVLoad:EdfaTempUnsettled", ...
-            "Pump temperature is %.2f degC against a target of %.2f. The " + ...
-            "manual allows 1 to 2 minutes to stabilise after power-up.", ...
-            actual, target);
-    end
-end
-
-function edfaRampTo(edfa, targetMa)
-% Stepped rather than jumped, which keeps the pump's thermal loop in range.
-
-    limit  = min(edfa.Cfg.CurrentLimit, edfa.Cfg.MaxCurrent);
-    target = max(0, min(round(targetMa), limit));
-
-    % Rounded, because the loop below closes an integer gap in integer steps.
-    % A fractional reading would step past the target forever.
-    present = round(edfaNumber(edfa, "current"));
-
-    while abs(present - target) > 0
-        step    = min(edfa.Cfg.RampStep, abs(target - present));
-        present = present + sign(target - present) * step;
-        edfaSet(edfa, "current", present);
-        pause(edfa.Cfg.RampDwell);
-    end
-end
-
-function edfaWarmUp(edfa, level, cfg)
-% The output stability spec is quoted after 15 minutes, so this hold is
-% what makes the first level comparable with the last.
-
-    if ~edfa.Enabled
-        return
-    end
-
-    edfaSet(edfa, "enable", 1);
-    pause(cfg.Edfa.EnableDelay);        % the manual specifies about 3 s
-
-    if ~edfaIsOn(edfa)
-        error("PVLoad:EdfaWillNotEnable", ...
-            "The amplifier did not turn on. The rear interlock must be " + ...
-            "shorted before it will enable.");
-    end
-
-    edfaRampTo(edfa, level.CurrentMa);
-
-    if cfg.Edfa.Warmup > 0
-        fprintf("Warming up for %.0f minutes at %g mA.\n", ...
-            cfg.Edfa.Warmup / 60, level.CurrentMa);
-        pause(cfg.Edfa.Warmup);
-    end
-end
-
-function level = edfaApplyLevel(edfa, level, cfg)
-
-    if ~edfa.Enabled
-        return
-    end
-
-    edfaRampTo(edfa, level.CurrentMa);
-
-    if ~edfaIsOn(edfa)
-        error("PVLoad:EdfaInterlock", ...
-            "The amplifier is off at level %d. If the interlock opened, " + ...
-            "the manual requires a deliberate re-enable; this script will " + ...
-            "not do that on its own.", level.Index);
-    end
-
-    level.CurrentReadback = edfaNumber(edfa, "current");
-    level.TempC           = edfaNumber(edfa, "temp");
-
-    pause(cfg.Edfa.LevelSettle);
-end
-
-function edfaShutdown(edfa, emergency)
-% Never throws: every abort path ends here. enable=0 goes first and alone
-% on an emergency, because it takes effect at once and the graceful ramp
-% is a courtesy for a normal exit.
-
-    if ~isstruct(edfa) || ~edfa.Enabled || isempty(edfa.Port)
-        return
-    end
-
-    if ~emergency
-        quietly(@() edfaRampTo(edfa, 0));
-    end
-    quietly(@() writeline(edfa.Port, "enable=0"));
-end
-
-
-%% =====================================================================
 %  Multimeters
 %  =====================================================================
 
@@ -2082,7 +1413,7 @@ function meas = connectMeters(cfg)
     fprintf("Current meter: %s\n", meas.IId);
 
     configureMeter(meas.V, "voltage", pickVoltageRange(cfg));
-    configureMeter(meas.I, "current", pickCurrentRange(cfg.Levels.IscFull, cfg));
+    configureMeter(meas.I, "current", pickCurrentRange(cfg.Cell.IscFull, cfg));
 
     meas.Enabled = true;
 end
@@ -2126,7 +1457,7 @@ function profile = selectProfile(profiles, model, name)
 end
 
 function m = openMeter(spec, role)
-% The one place a transport is chosen. On a 617 there is only the one: the
+% The one place a transport is chosen. On a 196 there is only the one: the
 % rear panel carries an IEEE-488 connector and nothing else. The 34401A
 % also has an RS-232 port, which VISA reaches as an ASRL resource, so an
 % address is not necessarily GPIB any more.
@@ -2181,12 +1512,11 @@ function text = availableResources()
 end
 
 function word = identifyMeter(m, role)
-% Neither Keithley has *IDN?. The U0 query returns the machine status word,
-% which opens with the model number and then spells out the front panel
-% setup, so one query identifies the instrument and reports its state. On
-% the 617 the format is 617 F RR C Z N T O B G D Q MM K YY, figure 3-11.
-% The 34401A does have *IDN?, whose reply is maker, model, serial and
-% firmware, so the model sits in the middle rather than at the front.
+% The 196 has no *IDN?. Its U0 query returns the machine status word, which
+% opens with the model number and then spells out the front panel setup, so
+% one query identifies the instrument and reports its state. The 34401A
+% does have *IDN?, whose reply is maker, model, serial and firmware, so the
+% model sits in the middle rather than at the front.
 %
 % Either way the model check is what catches a DMM_*_MODEL naming one meter
 % while the address reaches the other. That matters more now the two need
@@ -2222,7 +1552,6 @@ function configureMeter(m, role, range)
         ddcConfigure(m, role, range);
     end
 
-    zeroCorrect(m);
     assertMeterHappy(m, role);
 end
 
@@ -2303,47 +1632,16 @@ function scpiConfigure(m, role, range)
     end
 end
 
-function zeroCorrect(m)
-% 617 manual section 3.10.4. Zero check shorts the input to the ranging
-% amplifier, so the offset has to be captured with it on and then applied
-% with it off: C1, Z1, C0, a conversion apart so each has taken effect
-% before the next. A correction belongs to one range, which is why this
-% runs again whenever the range moves.
-%
-% Zero check is an electrometer facility. A meter without it returns
-% without sending anything at all, rather than sending a bare X, which
-% under T5 would be a trigger and would leave a reading nobody collects
-% sitting in front of the next one. The 34401A nulls its offset with
-% autozero instead, which scpiConfigure has already asked for.
-
-    D = m.Ddc;
-
-    if ~D.HasZeroCheck
-        return
-    end
-    if ~m.ZeroCorrect
-        ddcTell(m.Port, sprintf(D.ZeroCheck, 0));
-        return
-    end
-
-    ddcTell(m.Port, sprintf(D.ZeroCheck, 1) + sprintf(D.ZeroCorr, 0));
-    pause(m.Conversion);
-    ddcTell(m.Port, sprintf(D.ZeroCorr, 1));
-    pause(m.Conversion);
-    ddcTell(m.Port, sprintf(D.ZeroCheck, 0));
-    pause(m.Conversion);
-end
-
 function assertMeterHappy(m, role)
 % Whatever a command the meter did not understand cost, it is cheaper to
-% find here than in the CSV. On the Keithleys the U1 query returns the
-% error condition word, the model number and then one digit per error, 617
-% figure 3-12; anything but zeros is a rejected command. On the 34401A
-% SYST:ERR? pops one entry off the error queue and a clean one reads +0.
+% find here than in the CSV. On the 196 the U1 query returns the error
+% condition word, the model number and then one digit per error; anything
+% but zeros is a rejected command. On the 34401A SYST:ERR? pops one entry
+% off the error queue and a clean one reads +0.
 %
-% This is the check the two unverified profiles lean on. A letter or a
-% keyword that is not one the instrument knows becomes an error at
-% configuration rather than a wrong number later.
+% This is the check both profiles lean on, neither having been read off its
+% manual. A letter or a keyword that is not one the instrument knows
+% becomes an error at configuration rather than a wrong number later.
 
     D    = m.Ddc;
     word = meterAsk(m, D.Error);
@@ -2380,13 +1678,14 @@ function code = rangeCode(range, ranges, name, label)
 end
 
 function range = pickCurrentRange(iscExpected, cfg)
-% Isc scales with illumination, so the range is chosen once per level and
-% not per point: a range change costs a fresh zero correction, and 769 of
-% those per level would be absurd.
+% Settled once per run, before the first state, and never touched again.
+% A range change costs a fresh configuration, and 769 of those would be
+% absurd.
 %
 % Autorange exists and is not used. A range hunt inside a settled point
 % spends conversions on the wrong range, and the answer it would arrive at
-% is already known from ISC_FULL.
+% is already known from ISC_FULL. That number is the operator's estimate at
+% the illumination they set by hand; nothing here can see the lamp.
 
     I = cfg.Dmm.I;
 
@@ -2408,10 +1707,9 @@ function range = pickCurrentRange(iscExpected, cfg)
 end
 
 function range = pickVoltageRange(cfg)
-% Voc does not move with illumination the way Isc does, so this is settled
-% once rather than per level. Sizing it from VOC_FULL rather than naming a
-% number keeps one configuration working on every meter, whose ranges do
-% not line up: 20 V on a 617 is 30 V on a 196 and 100 V on a 34401A.
+% Sizing the range from VOC_FULL rather than naming a number keeps one
+% configuration working on either meter, whose ranges do not line up: a
+% 9 V Voc lands on 30 V on a 196 and 10 V on a 34401A.
 
     V = cfg.Dmm.V;
 
@@ -2420,7 +1718,7 @@ function range = pickVoltageRange(cfg)
         return
     end
 
-    fits = V.Ranges(V.Ranges >= cfg.Levels.VocFull);
+    fits = V.Ranges(V.Ranges >= cfg.Cell.VocFull);
     if isempty(fits)
         range = max(V.Ranges);
     else
@@ -2438,8 +1736,8 @@ end
 function [volts, amps, fault] = readPoint(meas, cfg)
 % Both meters are triggered before either reply is collected, so the two
 % conversions overlap. Each dialect gets there its own way, and with two
-% different instruments on the bench both ways can be in use at once. On a
-% Keithley, T5 makes the X that ends a command the trigger and K2 stops the
+% different instruments on the bench both ways are in use at once. On the
+% 196, T5 makes the X that ends a command the trigger and K2 stops the
 % meter holding the bus off until that conversion finishes, which is what
 % lets the second trigger leave while the first is running. On the 34401A
 % the two are separate commands to begin with: INIT starts a conversion
@@ -2475,7 +1773,7 @@ end
 
 function meterTrigger(m)
 % Start a conversion and return without waiting for it. A bare X under T5
-% on a Keithley, INIT on the 34401A.
+% on the 196, INIT on the 34401A.
 
     if m.Ddc.Dialect == "scpi"
         writeline(m.Port, m.Ddc.Trigger);
@@ -2485,8 +1783,8 @@ function meterTrigger(m)
 end
 
 function value = meterFetch(m)
-% Collect the reading a previous meterTrigger started. The Keithleys send
-% it unasked once the conversion ends; the 34401A holds it in memory until
+% Collect the reading a previous meterTrigger started. The 196 sends it
+% unasked once the conversion ends; the 34401A holds it in memory until
 % FETC? asks.
 
     if m.Ddc.Dialect == "scpi"
@@ -2511,16 +1809,16 @@ function value = meterDecode(m, reply)
     if m.Ddc.Dialect == "scpi"
         value = scpiDecode(reply, m.Ddc.Overflow);
     else
-        value = k617Decode(reply);
+        value = ddcDecode(reply);
     end
 end
 
-function value = k617Decode(reply)
+function value = ddcDecode(reply)
 % A reading carries its own status: N for normal or O for overflow, then
-% three letters for the function, then the mantissa and exponent, figure
-% 3-9. An overflow comes back as NaN so the caller counts it as a fault,
-% because it is a full-scale number that would otherwise sit in the CSV
-% looking like a measurement.
+% three letters for the function, then the mantissa and exponent. An
+% overflow comes back as NaN so the caller counts it as a fault, because it
+% is a full-scale number that would otherwise sit in the CSV looking like a
+% measurement.
 %
 % The prefix is required rather than optional. G0 in the setup string asks
 % for it, so a reply arriving without one is not a reading this code asked
@@ -2528,7 +1826,6 @@ function value = k617Decode(reply)
 % plausible number.
 %
 % Takes a string, not a port, so captured replies can drive it offline.
-% The 196 sends the same shape of reading, so one decoder serves both.
 
     text   = extractBefore(strtrim(string(reply)) + ",", ",");   % G2 suffix
     prefix = regexp(text, "^[NO](DCV|DCA|OHM|DCC|DCX)", "match", "once");
@@ -2542,7 +1839,7 @@ function value = k617Decode(reply)
 end
 
 function value = scpiDecode(reply, overflow)
-% A 34401A reading is the number and nothing else, so unlike the Keithley
+% A 34401A reading is the number and nothing else, so unlike the 196
 % decoder there is no prefix to demand and anything unparseable has to
 % carry the whole check. str2double gives NaN for that, which is what the
 % caller counts as a fault.
@@ -2572,7 +1869,7 @@ function meterTell(m, command)
 end
 
 function reply = meterAsk(m, command)
-% Send a command that does produce one, and insist on it. Both dialects
+% Send a command that does produce one, and insist on it. Both meters
 % answer a setting command with nothing at all, so routing a set through
 % here turns every successful write into a timeout.
 
@@ -2589,7 +1886,7 @@ function reply = meterAsk(m, command)
 end
 
 function ddcTell(port, command)
-% Nothing happens on a 617 until an X arrives, so every command leaves
+% Nothing happens on a 196 until an X arrives, so every command leaves
 % through here and every one of them gets one. An empty command is a bare
 % X, which under T5 is a trigger and nothing else.
 
@@ -2651,14 +1948,14 @@ end
 %  Execution
 %  =====================================================================
 
-function results = runExperiment(board, edfa, meas, plan, levels, cfg, log)
+function results = runExperiment(board, meas, plan, cfg, log)
 % Has to be a function, not script-level code. Ctrl-C in MATLAB is an
 % interrupt, not an exception: it does not run catch blocks. onCleanup is
 % the only thing that fires, and only when the workspace holding it is
 % destroyed, which never happens to a script's base workspace. This
 % function exists to give the guard a workspace to die with.
 
-    guard = onCleanup(@() safeShutdown(board, edfa, meas, cfg));
+    guard = onCleanup(@() safeShutdown(board, meas, cfg));
 
     enterSafeState(board);
     fprintf("Board initialised to the safe state (OPEN).\n");
@@ -2669,46 +1966,27 @@ function results = runExperiment(board, edfa, meas, plan, levels, cfg, log)
         fprintf("Self-test skipped. The potentiometers are unverified.\n");
     end
 
-    edfaWarmUp(edfa, levels(1), cfg);
+    % Once, not per point. A range change costs a fresh configuration, and
+    % 769 of those would be absurd; the range that fits is already known
+    % from ISC_FULL.
+    setCurrentRange(meas, cfg.Cell.IscFull, cfg);
 
-    results = allocateResults(numel(plan), numel(levels));
+    results = runSweep(board, meas, plan, cfg, log);
 
-    for k = 1:numel(levels)
-        levels(k) = edfaApplyLevel(edfa, levels(k), cfg);
-        levels(k).IRange = pickCurrentRange(levels(k).IscExpected, cfg);
-        meas = setCurrentRange(meas, levels(k).IscExpected, cfg);
-
-        fprintf("\n--- %s ---\n", describeLevel(levels(k)));
-
-        [results, levels(k)] = runLevel(board, meas, plan, levels(k), cfg, results);
-        levels(k) = closeLevel(edfa, levels(k));
-
-        if ~levels(k).Valid
-            warning("PVLoad:LevelInvalid", ...
-                "The amplifier was off when level %d finished. Treat that " + ...
-                "level's data as suspect.", levels(k).Index);
-            results = markLevelInvalid(results, levels(k).Index);
-        end
-
-        fprintf("Level %d done. %d read fault(s).\n", ...
-            levels(k).Index, levels(k).Faults);
-        appendLevel(log, results, levels(k), numel(plan));
-    end
-
-    writeLevelTable(log, levels);
-
-    edfaShutdown(edfa, false);
     enterSafeState(board);
+    clear guard;
 end
 
-function [results, level] = runLevel(board, meas, plan, level, cfg, results)
+function results = runSweep(board, meas, plan, cfg, log)
 % A failure on the very first point is misconfiguration rather than a
 % glitch, so it aborts instead of NaNing its way through 769 states.
 
-    total = numel(plan);
-    base  = (level.Index - 1) * total;
-    prev  = "";
-    run   = 0;                 % consecutive faults
+    total   = numel(plan);
+    results = allocateResults(total);
+    prev    = "";
+    run     = 0;               % consecutive faults
+    faults  = 0;
+    written = 0;               % states already on disk
 
     for k = 1:total
         settle = settleFor(plan(k), prev, cfg);
@@ -2718,104 +1996,78 @@ function [results, level] = runLevel(board, meas, plan, level, cfg, results)
         [volts, amps, fault] = readPoint(meas, cfg);
 
         if fault
-            level.Faults = level.Faults + 1;
-            run = run + 1;
-            % A failure on the very first point of a level is
-            % misconfiguration, not a glitch, so it fails fast.
+            faults = faults + 1;
+            run    = run + 1;
             if k == 1 || run > cfg.Dmm.MaxFaults
                 error("PVLoad:MeterUnresponsive", ...
-                    "The meters failed %d reading(s) in a row at level %d, " + ...
-                    "state %d of %d. Check the cabling and the address.", ...
-                    run, level.Index, k, total);
+                    "The meters failed %d reading(s) in a row at state " + ...
+                    "%d of %d. Check the cabling and the addresses.", ...
+                    run, k, total);
             end
         else
             run = 0;
         end
 
-        results = recordPoint(results, base + k, level, k, plan(k), ...
-                              settle, volts, amps);
+        results = recordPoint(results, k, plan(k), settle, volts, amps);
 
         if cfg.PrintStatus
-            printState(level, k, total, plan(k), volts, amps);
+            printState(k, total, plan(k), volts, amps);
+        end
+
+        % Flushed in blocks rather than at the end, so an abort keeps
+        % everything up to the last block boundary. Per row would be
+        % correct and far too slow: writetable reopens the file each call.
+        if k - written >= cfg.Out.Chunk || k == total
+            appendPoints(log, results, (written + 1):k, written == 0);
+            written = k;
         end
     end
+
+    fprintf("\n%d read fault(s).\n", faults);
 end
 
-function level = closeLevel(edfa, level)
-% Checked at the boundaries only, to keep 769 extra round trips per level
-% out of the sweep. A mid-level trip therefore marks the whole level
-% suspect rather than some guessed-at subset of it.
-
-    if ~edfa.Enabled
-        return
-    end
-
-    try
-        level.Valid = edfaIsOn(edfa);
-    catch
-        level.Valid = false;
-    end
-end
-
-function results = allocateResults(nStates, nLevels)
+function results = allocateResults(nStates)
 % Filled by index rather than grown, which keeps this linear.
 
-    n = nStates * nLevels;
-    z = nan(n, 1);
+    z = nan(nStates, 1);
 
     results = struct( ...
-        'LevelIndex',  z, 'LevelCurrentMa', z, 'LevelPowerMw', z, ...
-        'LevelValid',  true(n, 1), ...
-        'StateIndex',  z, 'Mode', strings(n, 1), ...
+        'StateIndex',  z, 'Mode', strings(nStates, 1), ...
         'Code1',       z, 'Code2', z, 'RNominal', z, ...
         'VoltageV',    z, 'CurrentA', z, 'ResistanceOhm', z, 'PowerW', z, ...
-        'SettleS',     z, 'Timestamp', NaT(n, 1));
+        'SettleS',     z, 'Timestamp', NaT(nStates, 1));
 end
 
-function results = recordPoint(results, row, level, stateIndex, state, ...
-                               settle, volts, amps)
+function results = recordPoint(results, row, state, settle, volts, amps)
 % One row.
 %
 % Resistance and power are computed from the measured values, never from
 % the wiper code. That is the whole reason the board carries no sensing:
 % the tap code is a repeatable setting, not a known resistance.
 
-    results.LevelIndex(row)     = level.Index;
-    results.LevelCurrentMa(row) = level.CurrentMa;
-    results.LevelPowerMw(row)   = level.PowerMw;
-    results.StateIndex(row)     = stateIndex;
-    results.Mode(row)           = state.Mode;
-    results.Code1(row)          = state.Code1;
-    results.Code2(row)          = state.Code2;
-    results.RNominal(row)       = state.Resistance;
-    results.VoltageV(row)       = volts;
-    results.CurrentA(row)       = amps;
-    results.ResistanceOhm(row)  = volts / amps;
-    results.PowerW(row)         = volts * amps;
-    results.SettleS(row)        = settle;
-    results.Timestamp(row)      = datetime("now");
+    results.StateIndex(row)    = row;
+    results.Mode(row)          = state.Mode;
+    results.Code1(row)         = state.Code1;
+    results.Code2(row)         = state.Code2;
+    results.RNominal(row)      = state.Resistance;
+    results.VoltageV(row)      = volts;
+    results.CurrentA(row)      = amps;
+    results.ResistanceOhm(row) = volts / amps;
+    results.PowerW(row)        = volts * amps;
+    results.SettleS(row)       = settle;
+    results.Timestamp(row)     = datetime("now");
 end
 
-function results = markLevelInvalid(results, levelIndex)
-    results.LevelValid(results.LevelIndex == levelIndex) = false;
-end
-
-function printState(level, index, total, state, volts, amps)
-    if isnan(level.CurrentMa)
-        tag = "  ambient  ";
-    else
-        tag = sprintf("%4g mA", level.CurrentMa);
-    end
-
+function printState(index, total, state, volts, amps)
     if isnan(volts) && isnan(amps)
         reading = "";
     else
         reading = sprintf("   V=%9.5f  I=%9.4f mA", volts, 1e3 * amps);
     end
 
-    fprintf("[lvl %d %s] [%4d/%4d] %-5s  U1=%3d  U2=%3d  ~%9.1f ohm%s\n", ...
-        level.Index, tag, index, total, state.Mode, ...
-        state.Code1, state.Code2, state.Resistance, reading);
+    fprintf("[%4d/%4d] %-5s  U1=%3d  U2=%3d  ~%9.1f ohm%s\n", ...
+        index, total, state.Mode, state.Code1, state.Code2, ...
+        state.Resistance, reading);
 end
 
 
@@ -2823,12 +2075,13 @@ end
 %  Logging
 %  =====================================================================
 
-function log = openLog(cfg, levels)
-% Two files, not one wide one: a per-point table where every row is a
-% measurement, and a per-level table for what is constant across a level.
-% A shared timestamp keeps a run together and sorts the folder by date.
+function log = openLog(cfg, nStates)
+% One file per run, named for when it started. Never overwritten: the
+% timestamp is what stops a second run landing on the first, and RUN_TAG is
+% what tells two runs at different illumination apart afterwards, since
+% nothing in the script knows what the lamp was doing.
 
-    log = struct('Readings', "", 'Levels', "", 'Started', false);
+    log = struct('Readings', "");
 
     if ~cfg.Out.WriteCsv
         return
@@ -2846,59 +2099,35 @@ function log = openLog(cfg, levels)
     end
 
     log.Readings = string(fullfile(dir, "pvload_" + stamp + tag + ".csv"));
-    log.Levels   = string(fullfile(dir, "pvload_" + stamp + tag + "_levels.csv"));
 
     fprintf("Logging to %s\n", log.Readings);
-    fprintf("  %d level(s) will be appended as each one finishes.\n", ...
-        numel(levels));
+    fprintf("  %d states, written in blocks of %d.\n", nStates, cfg.Out.Chunk);
 end
 
-function appendLevel(log, results, level, nStates)
-% Written as soon as a level is done, so an abort keeps what it measured.
+function appendPoints(log, results, rows, first)
+% Called as each block of states finishes, so an abort keeps what it
+% measured. The first call writes the header and the rest append.
 
     if strlength(log.Readings) == 0
         return
     end
 
-    rows = (level.Index - 1) * nStates + (1:nStates);
     t = table( ...
-        results.Timestamp(rows),     results.LevelIndex(rows), ...
-        results.LevelCurrentMa(rows), results.LevelPowerMw(rows), ...
-        results.LevelValid(rows),    results.StateIndex(rows), ...
+        results.Timestamp(rows),     results.StateIndex(rows), ...
         results.Mode(rows),          results.Code1(rows), ...
         results.Code2(rows),         results.RNominal(rows), ...
         results.VoltageV(rows),      results.CurrentA(rows), ...
         results.ResistanceOhm(rows), results.PowerW(rows), ...
         results.SettleS(rows), ...
-        'VariableNames', {'timestamp', 'level_index', 'level_current_ma', ...
-            'level_power_mw', 'level_valid', 'state_index', 'mode', ...
+        'VariableNames', {'timestamp', 'state_index', 'mode', ...
             'u1_code', 'u2_code', 'r_nominal_ohm', 'voltage_v', ...
             'current_a', 'resistance_ohm', 'power_w', 'settle_s'});
 
-    if level.Index == 1
+    if first
         writetable(t, log.Readings);
     else
         writetable(t, log.Readings, 'WriteMode', 'append');
     end
-end
-
-function writeLevelTable(log, levels)
-% Everything constant across a level, written once at the end.
-
-    if strlength(log.Levels) == 0
-        return
-    end
-
-    t = table([levels.Index]', [levels.CurrentMa]', ...
-        [levels.CurrentReadback]', [levels.PowerMw]', [levels.Source]', ...
-        [levels.TempC]', [levels.IscExpected]', [levels.OpenFraction]', ...
-        [levels.IRange]', [levels.Faults]', [levels.Valid]', ...
-        'VariableNames', {'level_index', 'current_set_ma', ...
-            'current_readback_ma', 'power_mw', 'power_source', 'temp_c', ...
-            'isc_expected_a', 'open_fraction', 'i_range_a', 'read_faults', ...
-            'valid'});
-
-    writetable(t, log.Levels);
 end
 
 
@@ -2906,20 +2135,14 @@ end
 %  Shutdown
 %  =====================================================================
 
-function safeShutdown(board, edfa, meas, cfg)
-% Ordering matters: the Class 3B output goes off first and without waiting
-% for a graceful ramp, then the load is made safe. Every step is guarded
-% separately and none rethrow, because this runs during an interrupt and
-% an error raised here would mask whatever caused the abort.
-
-    try
-        edfaShutdown(edfa, true);
-    catch shutdownError
-        warning("PVLoad:EdfaShutdownFailed", ...
-            "Could not confirm the pump is off: %s\nCheck the front " + ...
-            "panel ENABLE indicator before approaching the output.", ...
-            shutdownError.message);
-    end
+function safeShutdown(board, meas, cfg)
+% Every step is guarded separately and none rethrow, because this runs
+% during an interrupt and an error raised here would mask whatever caused
+% the abort.
+%
+% The cell is a supply and the board is what stands between it and a
+% short, so returning the board to OPEN is the whole job. Darkening the
+% cell is the operator's, the same as lighting it was.
 
     try
         enterSafeState(board);
@@ -2930,10 +2153,9 @@ function safeShutdown(board, edfa, meas, cfg)
     end
 
     closeMeters(meas);
-    quietly(@() delete(edfa.Port));
 
-    if cfg.Edfa.Enabled
-        fprintf("Pump disabled and board returned to OPEN.\n");
+    if cfg.Dmm.Enabled
+        fprintf("Board returned to OPEN and the meters are closed.\n");
     end
 end
 

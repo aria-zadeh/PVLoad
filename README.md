@@ -1,8 +1,7 @@
 # PVLoad
 
 Automated I-V curve measurement for photovoltaic cells. A programmable resistive load steps through
-769 load states while two bench electrometers record voltage and current at each one, and a fiber
-amplifier sets the illumination so the sweep can be repeated across a range of optical powers.
+769 load states while two bench multimeters record voltage and current at each one.
 
 Hardware is a 2-layer PCB carrying two SPI digital potentiometers and three reed relays. Control is
 MATLAB, over an Arduino Uno.
@@ -28,11 +27,12 @@ Relays reconfigure the topology to reach the ends of the curve, which the potent
 `LOW` and `FULL` start from one and two wiper resistances respectively. The offset is not an integer
 number of steps, so the two ladders interleave and resolve finer than the 19.6 Ω step size.
 
-Because an I-V curve is only defined at a stated illumination, a Thorlabs EDFA100P fiber amplifier
-lights the cell over a USB virtual COM port. The full sweep repeats at each requested optical power.
+An I-V curve is only defined at a stated illumination, but the illumination is set by hand and the
+software does not touch it. One run of the sweep is one curve at whatever light the bench is under;
+a family of curves is several runs, told apart by `RUN_TAG`.
 
-The board contains no measurement circuitry. Voltage and current come from two Keithley 617
-programmable electrometers addressed over VISA.
+The board contains no measurement circuitry. Voltage and current come from two bench multimeters
+addressed over VISA: a Keithley 196 and an Agilent 34401A.
 
 ![Schematic](docs/img/schematic.png)
 
@@ -47,7 +47,7 @@ programmable electrometers addressed over VISA.
 | Short-circuit path | 0.150 Ω relay contact |
 | Open-circuit path | 470 kΩ |
 | Cell under test | ≤9 V open circuit, ≤16 mA short circuit |
-| Illumination | Thorlabs EDFA100P, 0–1000 mA pump current over USB |
+| Illumination | Set by hand, not by this software |
 | Control | SPI from an Arduino Uno, driven from MATLAB |
 | Supplies | 24 V bench supply (analog), 5 V from the Arduino (logic) |
 | Board | 2-layer, hand-assembled |
@@ -77,9 +77,10 @@ a 1N4148 flyback diode across the coil. The relay has no internal diode.
 **No on-board ADC.** An integrated converter would require calibration against a bench meter, so
 the meters are used directly.
 
-**Two electrometers.** Current is measured in series and voltage in parallel; one instrument cannot
-do both simultaneously. Both are triggered before either reply is read, so their conversions overlap
-and the readings describe the same instant.
+**Two meters.** Current is measured in series and voltage in parallel; one instrument cannot do
+both simultaneously. Both are triggered before either reply is read, so their conversions overlap
+and the readings describe the same instant. They need not be the same model, and on this bench they
+are not: the voltmeter and the ammeter carry separate command profiles.
 
 ## Repository layout
 
@@ -97,7 +98,7 @@ hardware/
   gerbers/         Gerber X2 and NC drill files
   bom.pdf          Bill of materials
 matlab/
-  PVLoad_Main.m    Sweep controller, amplifier driver, meter driver
+  PVLoad_Main.m    Sweep controller and meter drivers
   test_arduino.m   Pin-by-pin bench test of the Arduino alone
 data/
   sweep_data/      CSV output
@@ -112,8 +113,8 @@ map, SPI command format, initialization requirements, timing, and BOM with part 
 | Component | Requires |
 |---|---|
 | Board | MATLAB R2019a+, MATLAB Support Package for Arduino Hardware, Arduino Uno, 24 V bench supply |
-| Amplifier | Thorlabs EDFA100P, USB driver, interlock shorted |
-| Meters | Two of: Keithley 617 electrometer, Keithley 196 system DMM, Agilent 34401A multimeter. They need not be the same model. USB-GPIB adapter, Instrument Control Toolbox, vendor VISA runtime |
+| Meters | A Keithley 196 and an Agilent 34401A, in either role. USB-GPIB adapter, Instrument Control Toolbox, vendor VISA runtime |
+| Illumination | Whatever lights the cell. Set and recorded by hand |
 
 No firmware to compile. The support package ships its own, and SPI transactions are issued from the
 host over USB.
@@ -123,24 +124,24 @@ Libraries separately, matching the vendor to your GPIB adapter. Without one, `vi
 `Unable to find VISA installations`; with one and no instruments attached it reports `Unable to
 find any VISA resources`.
 
-`DMM_V_MODEL`, `DMM_I_MODEL`, and `DMM_R_MODEL` select the instrument for each meter, from `"617"`,
-`"196"`, and `"34401A"`. The model is named per meter rather than once for the bench, so the
-voltmeter and the ammeter can be different instruments. One profile per model at the top of Part 2
-holds what differs: which command selects which function, what ranges exist, whether the meter has
-zero check, and how a reading is decoded. Each meter carries its own profile from the moment it is
-opened, so a sweep can run a 196 on volts and a 34401A on amps.
+`DMM_V_MODEL`, `DMM_I_MODEL`, and `DMM_R_MODEL` select the instrument for each meter, from `"196"`
+and `"34401A"`. The model is named per meter rather than once for the bench, so the voltmeter and
+the ammeter can be different instruments, and here they are. One profile per model at the top of
+Part 2 holds what differs: which command selects which function, what ranges exist, and how a
+reading is decoded. Each meter carries its own profile from the moment it is opened.
 
-The Keithley 617 electrometer and the Keithley 196 system DMM speak the same device-dependent
-command language, where a command is a letter and a number and nothing takes effect until an `X`
-arrives. The Agilent 34401A is SCPI, so its commands are words, one per line, and a reading is a
-bare number with no prefix. Each profile carries a dialect, and the functions that talk to the bus
-branch on it.
+The two speak different languages. On the 196 a command is a letter and a number, several travel in
+one string, and nothing takes effect until an `X` arrives. The 34401A is SCPI, so its commands are
+words, one per line, and a reading is a bare number with no prefix. Each profile carries a dialect
+and the functions that talk to the bus branch on it, so both are in use at once during a sweep.
 
-Neither the 196 profile nor the 34401A profile has been checked against its manual on this bench.
-What protects a run is that the setup is followed by the error query, so a command the meter does
-not know fails at configuration rather than producing a wrong number.
+The 196 profile is read off Keithley 196-901-01 Rev D: functions from §3.9.2, ranges from table 3-9,
+the setup string from table 3-8, and the 24 ms conversion from table 3-16. The 34401A profile is
+read off 34401-90004 but has not yet been run against the instrument. Either way the setup is
+followed by the error query, so a command the meter does not know fails at configuration rather than
+producing a wrong number.
 
-The 617 has an IEEE-488 interface and nothing else, so it requires a USB-GPIB adapter. Match the
+The 196 has an IEEE-488 interface and nothing else, so it requires a USB-GPIB adapter. Match the
 adapter to the installed VISA: NI-VISA drives National Instruments hardware, Keysight IO Libraries
 drive Keysight hardware. The 34401A also has an RS-232 port, which VISA reaches as an `ASRL`
 resource; the script sends `SYST:REM` on that transport only, because GPIB addressing does the same
@@ -160,11 +161,13 @@ Order matters. The cell is a supply, so it goes in last and comes out first — 
 1. Connect the Arduino to the board through the 1x10 header.
 2. Connect the bench supply to J2 (+24 V) and J3 (GND).
 3. Connect the cell to J1 (PV+) and J3 (GND), with the ammeter in series on the PV+ lead, and
-   keep it dark for now.
+   keep it dark for now. Current goes into the ammeter's own terminal, `AMPS` on the 196 and the
+   fused current terminal on the 34401A, never the volts terminal.
 4. Connect the voltmeter across the cell terminals, upstream of the ammeter. Not across J1 and J3 —
    see [Measurement notes](#measurement-notes).
 5. Power up 24 V first, then the Arduino.
-6. Set `RUN` and the port and address settings in Part 1 of `matlab/PVLoad_Main.m`, and start it.
+6. Set `RUN`, the port and address settings, and `RUN_TAG` in Part 1 of `matlab/PVLoad_Main.m`,
+   then start it.
 7. Illuminate the cell once the script is running and the relays are in a defined state.
 
 Shut down in reverse: darken the cell, then the Arduino's 5 V, then 24 V.
@@ -182,20 +185,19 @@ independently.
 | `"wiper"` | Arduino | Park at the state pairs whose difference is one wiper resistance |
 | `"k3"` | Arduino | Four holds that say whether K3 closes |
 | `"verify"` | Arduino | Seven holds that exercise every part of a freshly built board |
-| `"ohms"` | Arduino, one electrometer | Measure every state in the sweep on ohms, write a CSV and save a plot |
-| `"edfa"` | amplifier | Identify, report temperature and status, ramp through configured levels |
-| `"meters"` | electrometers | Identify, configure, take ten readings |
-| `"sweep"` | all | Full experiment, written to CSV |
+| `"ohms"` | Arduino, one meter | Measure every state in the sweep on ohms, write a CSV and save a plot |
+| `"meters"` | both sweep meters | Identify, configure, take ten readings |
+| `"sweep"` | Arduino, both meters | Full experiment, written to CSV |
 
-`"sweep"` enters the safe state, self-tests both potentiometers over SPI, warms up the amplifier,
-then steps through every load state at every illumination level:
+`"sweep"` enters the safe state, self-tests both potentiometers over SPI, sizes the ammeter range
+once, then steps through every load state:
 
 ```
-[lvl 2  450 mA] [  42/ 769] LOW    U1= 41  U2=  0  ~   1004.1 ohm   V=  6.21180  I=   9.8340 mA
+[  42/ 769] LOW    U1= 41  U2=  0  ~   1004.1 ohm   V=  6.21180  I=   9.8340 mA
 ```
 
-Press Ctrl-C once and wait ~3 seconds to abort. The cleanup handler disables the pump and returns
-the board to `OPEN`.
+Press Ctrl-C once and wait ~3 seconds to abort. The cleanup handler returns the board to `OPEN` and
+closes the meters. Darkening the cell is yours, the same as lighting it was.
 
 `SELF_TEST = false` skips potentiometer readback, allowing the control flow to run on a bare Arduino
 with the board disconnected.
@@ -203,42 +205,36 @@ with the board disconnected.
 ## Configuration
 
 `PVLoad_Main.m` is split into two parts. Part 1 holds the settings intended to be changed. Part 2
-describes the pin map, amplifier protocol, and meter command set, and changes only with the
-hardware.
+describes the pin map and the meter command sets, and changes only with the hardware.
 
 | Setting | Description |
 |---|---|
 | `RUN` | Mode, per the table above |
-| `SERIAL_PORT`, `EDFA_PORT` | COM ports; enumerate with `serialportlist("available")` |
+| `SERIAL_PORT` | Arduino COM port; enumerate with `serialportlist("available")` |
 | `DMM_V_ADDRESS`, `DMM_I_ADDRESS` | VISA resource strings; enumerate with `visadevlist` |
 | `DMM_R_ADDRESS` | VISA resource string of the single meter `"ohms"` uses; that mode ignores `DMM_ENABLED` |
-| `DMM_V_MODEL`, `DMM_I_MODEL`, `DMM_R_MODEL` | `"617"`, `"196"`, or `"34401A"` per meter; selects the command profile and range lists. They need not match |
+| `DMM_V_MODEL`, `DMM_I_MODEL`, `DMM_R_MODEL` | `"196"` or `"34401A"` per meter; selects the command profile and range lists. They need not match |
 | `DMM_V_RANGE`, `DMM_I_RANGE`, `DMM_R_RANGE` | Fixed meter ranges, or 0 to size from `VOC_FULL`, `ISC_FULL`, and autorange |
-| `EDFA_ENABLED`, `DMM_ENABLED` | Which subsystems are attached |
-| `ISC_FULL`, `VOC_FULL`, `POWER_FULL` | Approximate cell behavior; sizes meter ranges and prints estimates. Only `ISC_FULL` and `VOC_FULL` past a range are errors |
-| `CAL_CURRENT_MA`, `CAL_POWER_MW` | Amplifier calibration arrays |
-| `LEVEL_MODE`, `LEVEL_SPACING`, `LEVEL_VALUES` | Illumination level selection |
-| `EDFA_CURRENT_LIMIT` | Pump current ceiling; device maximum is 1000 mA |
-| `EDFA_WARMUP` | Hold at first level, in seconds |
+| `DMM_ENABLED` | Whether both sweep meters are attached |
+| `ISC_FULL`, `VOC_FULL` | Approximate cell behavior under the light you will run it at; sizes meter ranges and prints estimates. Past a range they are errors |
 | `RAMP_STEPS`, `RAMP_DWELL` | States visited by `"ramp"` and how long each state is held |
 | `DMM_NPLC`, `DMM_LINE_HZ` | Integration time in power line cycles, and the mains frequency that turns it into seconds. 34401A only |
 | `WIPER_CODES` | Codes `"wiper"` compares at |
 | `OHMS_SETTLE` | Per-state hold in `"ohms"` before the reading is triggered |
 | `SETTLE_TIME` | Per-state hold when no meters are attached |
-| `WRITE_CSV`, `OUT_DIR`, `RUN_TAG` | Output |
+| `WRITE_CSV`, `OUT_DIR`, `RUN_TAG` | Output. `RUN_TAG` is the only record of the illumination |
 
-The 617 has no integration-time setting, so there is nothing to trade between noise and speed. A
-conversion takes 365 ms or 780 ms depending on function and range, which fixes the run time. The 196
-does have a resolution setting, and its profile asks for 5.5 digits. The 34401A integrates for
-`DMM_NPLC` power line cycles, doubled when `DMM_ZERO_CORRECT` is set because autozero takes a zero
-reading between measurements. Both meters are triggered
-before either reply is read, so a point costs one conversion rather than two, and a 769-state level
-takes about six minutes. `RUN = "plan"` prints the estimate for a given
-configuration.
+The two meters are not the same speed. The 196 has a resolution setting rather than an integration
+time; its profile asks for 5.5 digits, which is one line cycle of integration and 24 ms from trigger
+to reading-ready. The 34401A integrates for `DMM_NPLC` power line cycles, doubled when
+`DMM_ZERO_CORRECT` is set because autozero takes a zero reading between measurements: about 390 ms
+at the default 10 NPLC. Both are triggered before either reply is read, so a point costs the slower
+of the two rather than their sum, and a 769-state sweep takes about six minutes. `RUN = "plan"`
+prints the estimate for a given configuration.
 
 ### Checking the load with a handheld meter
 
-`RUN = "ramp"` needs no cell, no amplifier, and no bench meters. Bring up 24 V, then the Arduino,
+`RUN = "ramp"` needs no cell and no bench meters. Bring up 24 V, then the Arduino,
 clip a handheld meter across J1 and J3 in ohms, and run it. The board climbs from the `SHORT` relay
 contact to the 470 kΩ `OPEN` path in `RAMP_STEPS` stages, holding each for `RAMP_DWELL` seconds so
 an autoranging meter has time to settle.
@@ -262,10 +258,10 @@ Neither difference contains the leads, the jacks or K1. `Rw2` is a switch rather
 so the same value should come back at every code in `WIPER_CODES`; one that tracks the code is
 `R_AB` being wrong instead.
 
-### Measuring the load with one electrometer
+### Measuring the load with one meter
 
 `RUN = "ohms"` is `"ramp"` with the copying down done by an instrument. It needs the Arduino and a
-single meter on ohms across J1 and J3, with no cell, no amplifier, and no second meter, so
+single meter on ohms across J1 and J3, with no cell and no second meter, so
 `DMM_ENABLED` stays out of it and `DMM_R_ADDRESS` says which meter to open. Bring up 24 V before the
 Arduino as usual: the potentiometer resistor networks run from that rail, and a board without it
 reads as series resistance rather than as a ladder. Every one of the 769 states is visited once,
@@ -275,8 +271,8 @@ The output is two files under `OUT_DIR`, sharing one timestamp: `pvload_<stamp>_
 per state, and `pvload_<stamp>_ohms.png` plotting measured resistance against the model on log axes,
 with the ratio of the two below it. A ratio of 1 is agreement.
 
-No meter reaches the bottom of the sweep: the lowest ohms range is 2 kΩ on the 617, 300 Ω on the
-196, and 100 Ω on the 34401A, against a 0.150 Ω `SHORT` contact. `DMM_R_RANGE` therefore defaults to the instrument's own
+Neither meter reaches the bottom of the sweep: the lowest ohms range is 300 Ω on the 196 and 100 Ω
+on the 34401A, against a 0.150 Ω `SHORT` contact. `DMM_R_RANGE` therefore defaults to the instrument's own
 autorange, and the low end is measured on the coarsest part of the most sensitive range. Points the
 meter returns as zero or negative stay in the CSV and are counted on the console rather than plotted.
 A reading carries the leads, the jacks and the traces exactly as a handheld does, so a constant few
@@ -286,103 +282,61 @@ ohms across every point is the wiring.
 in [docs/BRINGUP.md](docs/BRINGUP.md). `CELL_SETTLE` is still a placeholder at zero, and it is the
 settle-model term that matters most at high resistance. Measure and replace it.
 
-### Illumination levels
-
-| `LEVEL_MODE` | `LEVEL_VALUES` | Calibration required |
-|---|---|---|
-| `"current"` | Pump currents, mA | No |
-| `"power"` | Optical powers, mW | Yes |
-| `"table"` | Ignored; uses every calibration point | Yes |
-
-`LEVEL_SPACING` is `"list"` for literal values, or `"linear"` or `"log"` to read `LEVEL_VALUES` as
-`[min max]` and generate `LEVEL_COUNT` points. Use `"log"` when selecting by power, since Voc scales
-logarithmically with illumination.
-
-### Amplifier calibration
-
-The EDFA100P exposes pump current, not optical power, so the relationship must be measured once and
-supplied as two index-matched arrays in Part 1:
-
-```matlab
-CAL_CURRENT_MA = [ 100  150  200  250  300  400  500  600];
-CAL_POWER_MW   = [0.05  0.8  4.1  9.6   18   42   72  105];
-```
-
-Couple the amplifier output into an optical power meter, step the pump current from the standby
-threshold to `EDFA_CURRENT_LIMIT`, and record each pair. Ten to fifteen points is sufficient, with
-higher density near the threshold knee. Both arrays must be the same length and strictly increasing.
-Interpolation is linear and requested powers outside the measured range are rejected rather than
-extrapolated.
-
-Leave both empty and use `LEVEL_MODE = "current"` until measured.
-
 ## Output
 
-`"sweep"` writes two timestamped CSVs to `data/sweep_data/`:
-
-- `pvload_<stamp>.csv` — one row per point: `timestamp`, `level_index`, `level_current_ma`,
-  `level_power_mw`, `level_valid`, `state_index`, `mode`, `u1_code`, `u2_code`, `r_nominal_ohm`,
-  `voltage_v`, `current_a`, `resistance_ohm`, `power_w`, `settle_s`.
-- `pvload_<stamp>_levels.csv` — one row per illumination level: pump current readback, pump
-  temperature, meter range, failed reading count, and amplifier state at level end.
+`"sweep"` writes one timestamped CSV to `data/sweep_data/`, `pvload_<stamp>.csv`, with a row per
+point: `timestamp`, `state_index`, `mode`, `u1_code`, `u2_code`, `r_nominal_ohm`, `voltage_v`,
+`current_a`, `resistance_ohm`, `power_w`, `settle_s`.
 
 `resistance_ohm` and `power_w` are derived from measured voltage and current. `r_nominal_ohm` is the
 model estimate used to order the sweep and is not a measurement.
 
-Rows are appended per level, so an aborted run retains all completed levels.
+Nothing in the file records the illumination, because nothing in the script knows it. Set `RUN_TAG`
+before the run; it goes into the file name and is what tells two runs at different light apart.
+
+Rows are appended in blocks of 64 states, so an aborted run retains everything up to the last block
+boundary. The timestamp is what stops a second run overwriting the first.
 
 ## Measurement notes
 
-Connect the voltmeter across the cell terminals, upstream of the ammeter, rather than across J1 and
-J3. A voltmeter downstream of the ammeter reads low by the burden drop. The 617 is a feedback
-ammeter rather than a shunt ammeter, so that drop is under 1 mV on every range but 20 mA, where it
-is 3 mV. The placement no longer changes the shape of the curve, but it costs nothing to get right.
+Neither instrument here is an electrometer. Both are 6.5 digit DMMs, and both of the arguments
+below follow from that.
 
-**Input impedance.** The 617 presents more than 200 TΩ in parallel with 20 pF on every volts range.
-Against the 470 kΩ open-circuit path the divider error is a few parts per billion, so the `OPEN`
-state is a Voc reading rather than a loaded one.
+**Burden voltage.** Connect the voltmeter across the cell terminals, upstream of the ammeter, rather
+than across J1 and J3. A voltmeter downstream of the ammeter reads low by the ammeter's burden drop,
+and both of these meters read current across a shunt. On the 34401A the shunt is 5 Ω for the 10 mA
+and 100 mA ranges, so a 16 mA cell on the 100 mA range costs 80 mV. That is large enough to change
+the shape of the curve, not just its offset.
 
-**Current range.** The 617's current ranges climb by decades to 20 mA, which is the top one, so a
-~16 mA cell has exactly one range that fits. An `ISC_FULL` above 20 mA is refused at configuration
-time rather than measured on a saturated range. The range is named per level and never autoranged,
-because a range hunt inside a settled point spends conversions on the wrong range.
+**Input impedance, and which meter to put on volts.** Both meters present megohms rather than
+hundreds of teraohms, and against the 470 kΩ `OPEN` path that is a divider rather than a rounding
+error: a 10 MΩ input reads Voc about 4.5% low.
 
-**The three notes above are the 617's.** The 196 and the 34401A are 6.5 digit DMMs rather than
-electrometers, and the same three arguments come out differently on them. Current ranges start at
-3 mA on the 196 and 10 mA on the 34401A rather than 2 pA, and both read current across a shunt, so
-burden voltage is tens of millivolts rather than three. A ~16 mA cell lands on the 196's 30 mA range
-and the 34401A's 100 mA range. An `ISC_FULL` far below the meter's lowest range is a warning at
-configuration time, not an error.
+The 34401A can be told otherwise. `INP:IMP:AUTO ON` raises its input past 10 GΩ, and the script
+sends that command to whichever meter is the voltmeter. It only applies on the 100 mV, 1 V, and
+10 V ranges, so a `VOC_FULL` that pushes the meter onto 100 V puts the divider back. The setting is
+volatile and `CONFigure` clears it, which is why it is sent after the range on every configuration.
 
-**Input impedance on a DMM voltmeter.** Both DMMs present megohms rather than hundreds of teraohms,
-and against the 470 kΩ `OPEN` path that is a divider rather than a rounding error. A 10 MΩ input
-reads Voc about 4.5% low. The 34401A can be told otherwise: `INP:IMP:AUTO ON` raises it past 10 GΩ
-and the script sends that on the voltmeter, but only the 100 mV, 1 V, and 10 V ranges honour it, so
-a `VOC_FULL` that pushes the meter onto 100 V puts the divider back. The 196 has no equivalent
-command, and its 30 V and 300 V ranges are 10 MΩ. Nothing in the configuration warns about either
-case. With a mixed pair, put the 34401A on volts and the 196 on amps unless the `OPEN` point does
-not matter.
+The 196 has no equivalent command. Its 30 V range, where a 9 V Voc lands, is 10 MΩ.
 
-**Isc.** Three millivolts of burden and the 0.150 Ω relay contact put the `SHORT` state near 5 mV
-rather than at 0 V. Voltage is measured at every point, so `SHORT` is the lowest-voltage point on
-the curve rather than a point defined to be at zero. Isc is obtained by extrapolating to V = 0.
+So put the **34401A on volts and the 196 on amps**. On current the two are close enough not to
+matter; on voltage they are not. Nothing in the configuration warns about this, because nothing in
+the configuration knows the source impedance of the cell.
+
+**Current range.** A ~16 mA cell lands on the 196's 30 mA range and the 34401A's 100 mA range. The
+range is chosen once per run from `ISC_FULL` and never autoranged, because a range hunt inside a
+settled point spends conversions on the wrong range. An `ISC_FULL` above the meter's top range is
+refused at configuration time; one far below its lowest range is a warning, not an error.
+
+**Isc.** The burden drop and the 0.150 Ω relay contact put the `SHORT` state at millivolts rather
+than at 0 V. Voltage is measured at every point, so `SHORT` is the lowest-voltage point on the curve
+rather than a point defined to be at zero. Isc is obtained by extrapolating to V = 0.
 
 Instrument commands are collected in one profile per model in Part 2, selected per meter by
-`DMM_V_MODEL`, `DMM_I_MODEL`, and `DMM_R_MODEL`.
-Two dialects are supported: Keithley's own device-dependent command language, which does not port
-beyond that family, and SCPI.
+`DMM_V_MODEL`, `DMM_I_MODEL`, and `DMM_R_MODEL`. Two dialects are supported: Keithley's own
+device-dependent command language, which does not port beyond that family, and SCPI.
 
 ## Safety
-
-The EDFA100P is a **Class 3B** source at 1550 nm, which is invisible.
-
-- Output is never dark while the unit is enabled. It emits up to 30 mW of amplified spontaneous
-  emission with no optical input, regardless of pump current.
-- The rear interlock must be shorted for the amplifier to enable. If it opens, the unit shuts down
-  and the software will not re-enable it.
-- Terminate the output before running. Do not look into the fiber bulkhead.
-
-Electrical:
 
 - 24 V must come up before 5 V, and 5 V must come down first. D4, a Schottky from +5 V to +24 V,
   clamps the rails if the sequence is wrong, but it does not make the board usable on 5 V alone:
@@ -396,7 +350,9 @@ Electrical:
   clamp rating, which is harmless. But if 24 V drops out while 5 V is still up and K1 is closed, R1
   is shorted and the cell's full ~16 mA goes into the clamp — 80% of the absolute maximum, and the
   case that destroys a chip. D4 does not protect this path; it sits between the rails. Blocking the
-  light is equivalent to unplugging and easier on the jacks. `docs/HARDWARE.md` §7 has the ratings.
+  light is equivalent to unplugging and easier on the jacks. Since the illumination is set by hand,
+  this sequence is entirely yours to get right; nothing in the software can enforce it.
+  `docs/HARDWARE.md` §7 has the ratings.
 - Never close the short-circuit relay during an open-circuit reading. A 0.150 Ω contact in parallel
   with 470 kΩ collapses the reading to roughly 0 V.
 - Do not calculate resistance from the wiper code. The potentiometers carry ±20% tolerance and

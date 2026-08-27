@@ -18,7 +18,7 @@ selects the mode.
 
 `RUN = "verify"` is the seven-hold check for a freshly assembled board. `"ramp"`
 walks the whole sweep slowly enough to follow on a handheld. `"wiper"` and `"k3"`
-isolate single elements. All four touch the board only, with no laser and no
+isolate single elements. All four touch the board only, with no cell and no
 bench meters involved.
 
 ## Power order
@@ -153,6 +153,6 @@ than read off the 196 manual. The first `RUN = "ohms"` exercises them.
 
 **`CELL_SETTLE` is zero and unmeasured.**
 
-**`ISC_FULL`, `VOC_FULL` and `POWER_FULL` are the values the file shipped with.**
+**`ISC_FULL` and `VOC_FULL` are the values the file shipped with.**
 The cell is a power-over-fiber receiver for a SiC MOSFET gate driver. Its Voc and
 Isc have not been entered.

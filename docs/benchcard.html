@@ -102,6 +102,14 @@ output button, put the black lead in J3 first, then push the red lead into J2.</
 </section>
 
 <section>
+<h2>The light is yours to set</h2>
+<p>The script does not control the illumination and does not know what it is. Set the lamp, run the
+sweep, change the lamp, run it again. Each run writes its own timestamped CSV. Put the lamp setting
+in <span class="mono">RUN_TAG</span> first: nothing else records it, and two runs at different light
+are otherwise indistinguishable.</p>
+</section>
+
+<section>
 <h2>Using the handheld meter</h2>
 <p>Put the black lead in the socket marked <b>COM</b>. Put the red lead in the socket marked
 <b>V&#8486;</b>. Never use the <b>10A</b> socket. That socket makes the meter a piece of wire and
@@ -113,56 +121,59 @@ shorts J1 to J3.</p>
 <section>
 <h2>Cables to the laptop</h2>
 <p><b>Arduino.</b> A standard USB printer cable, A to B.</p>
-<p><b>EDFA100P laser.</b> A standard USB cable.</p>
 <p><b>Bench supply.</b> Two banana leads to J2 and J3. Set 24.0 V and a current limit near 100 mA.</p>
-<p class="gap"><b>The two Keithley 617 meters.</b> These have no USB. They have one GPIB socket, the
-wide connector with two screws. Use a single USB to GPIB adapter, National Instruments brand. Plug the
-adapter into the laptop. Run a GPIB cable from the adapter to the first meter. GPIB connectors stack,
-so run a second GPIB cable from the first meter to the second. Both meters share the one adapter.</p>
-<p>Set a different address on each meter before you connect them. Both meters arrive on address 27,
-and two meters cannot share one address. Set the volts meter to <b>22</b> and the amps meter to
-<b>23</b>.</p>
+<p class="gap"><b>The two bench meters.</b> A Keithley 196 and an Agilent 34401A. Neither has USB.
+Each has one GPIB socket, the wide connector with two screws. Use a single USB to GPIB adapter,
+Keysight 82357B. Plug the adapter into the laptop. Run a GPIB cable from the adapter to the first
+meter. GPIB connectors stack, so run a second GPIB cable from the first meter to the second. Both
+meters share the one adapter.</p>
+<p>Give each meter its own address before you connect them. Two meters cannot share one. Whatever
+you choose, it has to match <span class="mono">DMM_V_ADDRESS</span> and
+<span class="mono">DMM_I_ADDRESS</span> in the script.</p>
 </section>
 
 <section>
-<h2>Connecting the 617 meters to the cell</h2>
-<p>The front socket marked <span class="mono">INPUT</span> is triaxial, so a banana plug does not fit.
-Screw on a triax to dual banana adapter. This gives you two banana posts, <b>HI</b> and <b>LO</b>.</p>
+<h2>Which meter goes where</h2>
+<p>Put the <b>34401A on volts</b> and the <b>196 on amps</b>. Both are ordinary DMMs on current, so
+that side is a wash. On volts they are not: at the open-circuit point the board presents 470 k&#8486;,
+and a 10 M&#8486; meter across it reads Voc about 4.5% low.</p>
+<p>The 34401A can be told to raise its input above 10 G&#8486;, and the script sends that command to
+whichever meter is the voltmeter. The 196 has no such command, and the 30 V range a 9 V cell lands on
+is 10 M&#8486;.</p>
+<p>Tell the script which is which with <span class="mono">DMM_V_MODEL</span> and
+<span class="mono">DMM_I_MODEL</span>. It asks each meter its model at startup and stops if they
+disagree.</p>
+</section>
 
-<p class="gap"><b>The amps meter goes inside the wire.</b> Current must flow through the meter. Cut
-the wire from the cell's + terminal to J1 and put the meter in the break.</p>
-<div class="wire">cell +&nbsp;&nbsp; &rarr;&nbsp; HI post<br>LO post&nbsp; &rarr;&nbsp; J1</div>
+<section>
+<h2>Connecting the meters to the cell</h2>
+<p><b>The amps meter goes inside the wire.</b> Current must flow through the meter. Cut the wire from
+the cell's + terminal to J1 and put the meter in the break. Current does not go into the volts
+terminal on either meter. On the 196 use <b>AMPS</b> and <b>LO</b>; on the 34401A use the
+current terminal, the one with the fuse symbol, and <b>LO</b>.</p>
+<div class="wire">cell +&nbsp;&nbsp; &rarr;&nbsp; AMPS or I<br>LO&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&rarr;&nbsp; J1</div>
 
-<p><b>The volts meter goes across the cell.</b> Cut nothing. Two leads touch the cell's terminals.</p>
-<div class="wire">HI post&nbsp; &rarr;&nbsp; cell +<br>LO post&nbsp; &rarr;&nbsp; cell &minus;</div>
+<p><b>The volts meter goes across the cell.</b> Cut nothing. Two leads touch the cell's terminals. On
+the 196 use <b>VOLTS OHMS HI</b> and <b>LO</b>; on the 34401A use <b>HI</b> and <b>LO</b>.</p>
+<div class="wire">HI&nbsp;&nbsp; &rarr;&nbsp; cell +<br>LO&nbsp;&nbsp; &rarr;&nbsp; cell &minus;</div>
 <p>Clip these to the cell's own leads, not to J1 and J3. On the jacks the reading passes through the
-amps meter and comes out low.</p>
+amps meter and comes out low by its burden drop, which is tens of millivolts on either of these
+meters. Both read current across a shunt.</p>
 </section>
 
 <section>
-<h2>Using the 617 meters</h2>
-<p>The power switch is on the front.</p>
-<p>At power up the meter is set to Volts and <b>ZERO CHECK</b> is on. With ZERO CHECK on, the meter
-reads zero whatever you connect. Press ZERO CHECK to turn it off before you measure by hand. The
-script turns it off itself when it drives the meter.</p>
-<p>The function buttons select V, A, ohms or coulombs. The script sets these too.</p>
-<p class="gap"><b>To set the GPIB address:</b> press SELECT until IEEE appears. Set the number with the
-ADJUST arrows. Press SHIFT, then SELECT, to store and exit.</p>
-<p><b>REMOTE</b> lights while the laptop drives the meter. Press LOCAL to take manual control back.</p>
-</section>
-
-<section>
-<h2>The laser interlock</h2>
-<p>A small connector on the back of the amplifier. It is a safety cutout for a door switch. Plug in
-the shorting plug supplied with the unit. If the connector is empty, the laser does not fire.</p>
-</section>
-
-<section>
-<div class="flag">
-<b>LASER SAFETY.</b> Class 3B, 1550 nm. You cannot see this light. The amplifier emits up to 30 mW
-whenever it is enabled, at any pump current, and with no optical input. Terminate the output. Never
-look into the fibre.
-</div>
+<h2>Meter front panels</h2>
+<p>Both meters duplicate their terminals on the back. The 196 chooses between the two sets with a
+rear switch marked <b>INPUT</b>; the 34401A with a lit button on the front. If readings do not move,
+check that first.</p>
+<p class="gap"><b>GPIB address on the 196:</b> press <b>PRGM</b>, <b>3</b>, <b>1</b>, set the number
+with the data entry keys, press <b>ENTER</b>. Factory 7, range 0 to 30.</p>
+<p><b>GPIB address on the 34401A:</b> press blue <b>Shift</b>, then <b>I/O</b>. Step to
+<b>HP-IB ADDR</b> with the arrow keys, set the number, press <b>Enter</b>. Factory 22, range 0
+to 31.</p>
+<p class="gap"><b>REMOTE</b> lights while the laptop drives a meter. <b>LOCAL</b> takes it back. The
+34401A's current input has its own fuse, reachable from outside; a blown one reads zero current with
+nothing else wrong.</p>
 </section>
 
 <section>
