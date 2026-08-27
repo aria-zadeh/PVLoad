@@ -113,7 +113,7 @@ map, SPI command format, initialization requirements, timing, and BOM with part 
 |---|---|
 | Board | MATLAB R2019a+, MATLAB Support Package for Arduino Hardware, Arduino Uno, 24 V bench supply |
 | Amplifier | Thorlabs EDFA100P, USB driver, interlock shorted |
-| Meters | Two Keithley 617 electrometers, USB-GPIB adapter, Instrument Control Toolbox, vendor VISA runtime |
+| Meters | Two Keithley 617 electrometers or two Keithley 196 system DMMs, USB-GPIB adapter, Instrument Control Toolbox, vendor VISA runtime |
 
 No firmware to compile. The support package ships its own, and SPI transactions are issued from the
 host over USB.
@@ -122,6 +122,14 @@ Instrument Control Toolbox does not include a VISA implementation. Install NI-VI
 Libraries separately, matching the vendor to your GPIB adapter. Without one, `visadevlist` reports
 `Unable to find VISA installations`; with one and no instruments attached it reports `Unable to
 find any VISA resources`.
+
+`DMM_MODEL` selects the instrument. Both the Keithley 617 electrometer and the Keithley 196 system
+DMM speak the same device-dependent command language, and the differences between them live in one
+profile each at the top of Part 2: which letter selects which function, what ranges exist, and
+whether the meter has zero check. The 196 profile has not been checked against its manual. Its
+letters are inferred from the family, and what protects a run is that the setup string is followed
+by the error query, so a command the meter does not know fails at configuration rather than
+producing a wrong number.
 
 The 617 has an IEEE-488 interface and nothing else, so it requires a USB-GPIB adapter. Match the
 adapter to the installed VISA: NI-VISA drives National Instruments hardware, Keysight IO Libraries
@@ -187,6 +195,8 @@ hardware.
 | `SERIAL_PORT`, `EDFA_PORT` | COM ports; enumerate with `serialportlist("available")` |
 | `DMM_V_ADDRESS`, `DMM_I_ADDRESS` | VISA resource strings; enumerate with `visadevlist` |
 | `DMM_R_ADDRESS` | VISA resource string of the single meter `"ohms"` uses; that mode ignores `DMM_ENABLED` |
+| `DMM_MODEL` | `"617"` or `"196"`; selects the command profile and range lists |
+| `DMM_V_RANGE`, `DMM_I_RANGE`, `DMM_R_RANGE` | Fixed meter ranges, or 0 to size from `VOC_FULL`, `ISC_FULL`, and autorange |
 | `EDFA_ENABLED`, `DMM_ENABLED` | Which subsystems are attached |
 | `ISC_FULL`, `VOC_FULL`, `POWER_FULL` | Approximate cell behavior; sizes meter ranges and prints estimates. Only `ISC_FULL` and `VOC_FULL` past a range are errors |
 | `CAL_CURRENT_MA`, `CAL_POWER_MW` | Amplifier calibration arrays |
@@ -200,9 +210,10 @@ hardware.
 | `WRITE_CSV`, `OUT_DIR`, `RUN_TAG` | Output |
 
 The 617 has no integration-time setting, so there is nothing to trade between noise and speed. A
-conversion takes 365 ms or 780 ms depending on function and range, which fixes the run time. Both
-meters are triggered before either reply is read, so a point costs one conversion rather than two
-and a 769-state level takes about six minutes. `RUN = "plan"` prints the estimate for a given
+conversion takes 365 ms or 780 ms depending on function and range, which fixes the run time. The 196
+does have a resolution setting, and its profile asks for 5.5 digits. Both meters are triggered
+before either reply is read, so a point costs one conversion rather than two, and a 769-state level
+takes about six minutes. `RUN = "plan"` prints the estimate for a given
 configuration.
 
 ### Checking the load with a handheld meter
@@ -234,16 +245,19 @@ so the same value should come back at every code in `WIPER_CODES`; one that trac
 ### Measuring the load with one electrometer
 
 `RUN = "ohms"` is `"ramp"` with the copying down done by an instrument. It needs the Arduino and a
-single 617 on ohms across J1 and J3, with no cell, no amplifier, and no second meter, so
-`DMM_ENABLED` stays out of it and `DMM_R_ADDRESS` says which meter to open. Every one of the 769
-states is visited once, held for `OHMS_SETTLE`, and read.
+single meter on ohms across J1 and J3, with no cell, no amplifier, and no second meter, so
+`DMM_ENABLED` stays out of it and `DMM_R_ADDRESS` says which meter to open. Bring up 24 V before the
+Arduino as usual: the potentiometer resistor networks run from that rail, and a board without it
+reads as series resistance rather than as a ladder. Every one of the 769 states is visited once,
+held for `OHMS_SETTLE`, and read.
 
 The output is two files under `OUT_DIR`, sharing one timestamp: `pvload_<stamp>_ohms.csv` with a row
 per state, and `pvload_<stamp>_ohms.png` plotting measured resistance against the model on log axes,
 with the ratio of the two below it. A ratio of 1 is agreement.
 
-The 617 has no ohms range below 2 kΩ, so `DMM_R_RANGE` defaults to the instrument's own autorange
-and the bottom of the sweep is measured on the coarsest part of the most sensitive range. Points the
+Neither meter reaches the bottom of the sweep: the lowest ohms range is 2 kΩ on the 617 and 300 Ω on
+the 196, against a 0.150 Ω `SHORT` contact. `DMM_R_RANGE` therefore defaults to the instrument's own
+autorange, and the low end is measured on the coarsest part of the most sensitive range. Points the
 meter returns as zero or negative stay in the CSV and are counted on the console rather than plotted.
 A reading carries the leads, the jacks and the traces exactly as a handheld does, so a constant few
 ohms across every point is the wiring.
@@ -313,12 +327,20 @@ state is a Voc reading rather than a loaded one.
 time rather than measured on a saturated range. The range is named per level and never autoranged,
 because a range hunt inside a settled point spends conversions on the wrong range.
 
+**The three notes above are the 617's.** A 196 is a 6.5 digit DMM rather than an electrometer: its
+current ranges start at 3 mA instead of 2 pA, it reads current across a shunt and so carries a real
+burden voltage, and its volts input is megohms rather than hundreds of teraohms. A ~16 mA cell fits
+its 30 mA range, but the divider and burden arguments have to be redone from its own specifications
+before a sweep taken on one is trusted. An `ISC_FULL` far below the meter's lowest range is a warning
+at configuration time, not an error.
+
 **Isc.** Three millivolts of burden and the 0.150 Ω relay contact put the `SHORT` state near 5 mV
 rather than at 0 V. Voltage is measured at every point, so `SHORT` is the lowest-voltage point on
 the curve rather than a point defined to be at zero. Isc is obtained by extrapolating to V = 0.
 
-Device-dependent commands are collected in a single `DDC` struct in Part 2. The dialect is
-Keithley's own rather than SCPI, so it belongs to this instrument family and does not port.
+Device-dependent commands are collected in one profile per instrument in Part 2, selected by
+`DMM_MODEL`. The dialect is Keithley's own rather than SCPI, so it belongs to this instrument family
+and does not port beyond it.
 
 ## Safety
 
