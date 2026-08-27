@@ -17,14 +17,25 @@ is common to both and cancels. Design any new check the same way.
 
 ## The diagnostic modes
 
-All four open the board and nothing else. No laser, no bench meters.
+The first four open the board and nothing else. No laser, no bench meters.
 
-| `RUN` | Holds | Answers |
+| `RUN` | States | Answers |
 |---|---|---|
 | `"verify"` | 7 | Is this board sound? |
 | `"k3"` | 4 | Does K3 close? |
 | `"wiper"` | varies | What is the wiper resistance? |
 | `"ramp"` | `RAMP_STEPS` | Does resistance track code across the whole range? |
+| `"ohms"` | 769 | The same question, measured rather than eyeballed |
+
+`"ohms"` is `"ramp"` without a person copying numbers off a handheld. It puts one
+electrometer on ohms across J1 and J3, walks every state in the sweep, and writes
+the readings to CSV with a plot. Still no cell and no amplifier. It takes one
+meter rather than the pair, so it ignores `DMM_ENABLED` and takes its address
+from `DMM_R_ADDRESS`. Around twelve minutes at the default `OHMS_SETTLE`.
+
+The meter carries the leads, the jacks and the traces exactly as a handheld does,
+so a constant offset of a few ohms across every point is the wiring and not the
+board. Read the differences, as everywhere else here.
 
 `"verify"` is the one to run first on anything freshly built. It touches both
 chips over SPI, all three relays, both ladders and R1. Its pass conditions are
