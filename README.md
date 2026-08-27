@@ -136,10 +136,12 @@ words, one per line, and a reading is a bare number with no prefix. Each profile
 and the functions that talk to the bus branch on it, so both are in use at once during a sweep.
 
 The 196 profile is read off Keithley 196-901-01 Rev D: functions from §3.9.2, ranges from table 3-9,
-the setup string from table 3-8, and the 24 ms conversion from table 3-16. The 34401A profile is
-read off 34401-90004 but has not yet been run against the instrument. Either way the setup is
-followed by the error query, so a command the meter does not know fails at configuration rather than
-producing a wrong number.
+the setup string from table 3-8, the 24 ms conversion from table 3-16, and the reading tags from
+figure 3-6. The 34401A profile is read off 34401-90004. Both have now been opened, identified and
+configured on the bench; neither has been run against a cell. Either way the setup is followed by
+the error query, so a command the meter does not know fails at configuration rather than producing a
+wrong number. [docs/BRINGUP.md](docs/BRINGUP.md) records what the bench actually said, including the
+three faults that took getting there.
 
 The 196 has an IEEE-488 interface and nothing else, so it requires a USB-GPIB adapter. Match the
 adapter to the installed VISA: NI-VISA drives National Instruments hardware, Keysight IO Libraries

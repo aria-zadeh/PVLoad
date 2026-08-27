@@ -23,7 +23,7 @@ clc;
 %   "meters"  both sweep meters only
 %   "sweep"   the full experiment, written to CSV
 
-RUN = "ohms";  
+RUN = "meters";  
 
 
 % Ports and addresses, and what each one needs on the bench. Wiring and the
@@ -43,12 +43,12 @@ RUN = "ohms";
 
 SERIAL_PORT = "COM4";                % Arduino com port
 
-DMM_ENABLED   = false;               % set to true if both sweep meters are
+DMM_ENABLED   = true;                % set to true if both sweep meters are
                                      % attached. the DMM_*_MODEL settings in
                                      % part 2 say which instrument each one
                                      % is; they need not be the same.
 DMM_V_ADDRESS = "GPIB0::22::INSTR";  % meter across the cell
-DMM_I_ADDRESS = "GPIB0::23::INSTR";  % meter in series with PV+
+DMM_I_ADDRESS = "GPIB0::1::INSTR";   % meter in series with PV+
 
 DMM_R_ADDRESS = "GPIB0::1::INSTR";  % the one meter RUN "ohms" uses, on
                                      % ohms across J1 and J3. that mode
@@ -175,8 +175,8 @@ R_OPEN_PATH  = 470e3;      % ohms, R1
 % carries a Dialect and the handful of functions that talk to the bus
 % branch on it.
 
-DMM_V_MODEL      = "196";          % "196" or "34401A", per meter.
-DMM_I_MODEL      = "34401A";       % the sweep's two, and then the single
+DMM_V_MODEL      = "34401A";       % "196" or "34401A", per meter.
+DMM_I_MODEL      = "196";          % the sweep's two, and then the single
 DMM_R_MODEL      = "196";          % meter RUN "ohms" opens
 DMM_TIMEOUT      = 10;             % s, must exceed one conversion
 DMM_ZERO_CORRECT = true;           % null the meter's own offset. 34401A
@@ -223,6 +223,7 @@ DDC_196 = struct( ...
     'Ohms',       "F2", ...
     'Range',      "R%d", ...
     'AutoRange',  "R0", ...
+    'Prefixes',   "DCV|ACV|OHM|OCO|DCI|ACI|dBV|dBI", ...
     'Common',     "Z0B0G0M0K2S2T5", ...
     'Machine',    "U0", ...
     'Error',      "U1", ...
@@ -244,6 +245,11 @@ DDC_196 = struct( ...
 %   Conversion is 24 ms, table 3-16, which is the trigger to reading-ready
 %   time at S2. The integration period itself is one line cycle; the rest
 %   is the bus. S3 would be 106 ms for one more digit.
+%
+%   Prefixes are the reading mnemonics of figure 3-6. DC amps is DCI, not
+%   the DCA another Keithley uses, and a decoder that does not know that
+%   turns every current reading into NaN once the meter is actually on
+%   amps. The bench found this the slow way.
 
 % Agilent 34401A, manual 34401-90004. Ranges are chapter 1, the input
 % resistance rule is chapter 3 under Measurement Configuration, and the
@@ -264,6 +270,12 @@ DDC_196 = struct( ...
 % function and range, which is what a fixed 0 would throw away; one trigger
 % and one sample, so a fetched reading is the reading and not the first of
 % a burst.
+%
+% The delay is TRIG:DEL:AUTO ON and not TRIG:DEL AUTO. Manual page 80 gives
+% TRIGger:DELay {<seconds>|MINimum|MAXimum} and TRIGger:DELay:AUTO {OFF|ON}
+% as separate commands, so AUTO is a node rather than a parameter and the
+% shorter form is -224, Illegal parameter value. The meter reported that on
+% the bench before this line was corrected.
 SCPI_34401A = struct( ...
     'Model',      "34401A", ...
     'Label',      "Agilent 34401A", ...
@@ -275,7 +287,7 @@ SCPI_34401A = struct( ...
     'Amps',       "CURR:DC", ...
     'Ohms',       "RES", ...
     'AutoRange',  "RANG:AUTO ON", ...
-    'Common',     ["TRIG:SOUR IMM", "TRIG:DEL AUTO", ...
+    'Common',     ["TRIG:SOUR IMM", "TRIG:DEL:AUTO ON", ...
                    "TRIG:COUN 1", "SAMP:COUN 1"], ...
     'AutoZero',   "ZERO:AUTO %s", ...
     'HighZ',      "INP:IMP:AUTO ON", ...
@@ -936,8 +948,6 @@ function runMeterCheck(cfg)
     meas  = connectMeters(cfg);
     guard = onCleanup(@() quietly(@() closeMeters(meas)));
 
-    setCurrentRange(meas, cfg.Cell.IscFull, cfg);
-
     fprintf("\nOne conversion takes about %.0f ms on the voltmeter and " + ...
         "%.0f ms on the ammeter.\n", ...
         1e3 * cfg.Dmm.V.Conversion, 1e3 * cfg.Dmm.I.Conversion);
@@ -1412,6 +1422,11 @@ function meas = connectMeters(cfg)
     fprintf("Voltage meter: %s\n", meas.VId);
     fprintf("Current meter: %s\n", meas.IId);
 
+    % Both ranges are settled here and never touched again. A range change
+    % costs a fresh configuration, and 769 of those would be absurd; the
+    % range that fits is already known from ISC_FULL and VOC_FULL. Doing it
+    % twice is worse than redundant on a Keithley, where each configuration
+    % leaves another triggered reading behind it.
     configureMeter(meas.V, "voltage", pickVoltageRange(cfg));
     configureMeter(meas.I, "current", pickCurrentRange(cfg.Cell.IscFull, cfg));
 
@@ -1480,7 +1495,7 @@ function m = openMeter(spec, role)
         % A meter can be mid-reading when a fresh session opens, and the
         % first query then waits on a terminator that has already gone past.
         % Without this every first read times out.
-        flush(m.Port);
+        flush(m.Port, "input");
         if D.Dialect == "scpi" && startsWith(upper(string(spec.Address)), "ASRL")
             % Over RS-232 the meter comes up in local and ignores the bus
             % until this arrives. Over GPIB the addressing does it and the
@@ -1553,6 +1568,14 @@ function configureMeter(m, role, range)
     end
 
     assertMeterHappy(m, role);
+
+    if m.Ddc.Dialect ~= "scpi"
+        % The error query's own X triggered one more conversion. Left in the
+        % buffer it would become the sweep's first reading, and every point
+        % after it would carry the previous state's value: a curve shifted
+        % by one rather than an obviously broken one.
+        flush(m.Port, "input");
+    end
 end
 
 function name = rangeSetting(role)
@@ -1637,27 +1660,48 @@ function assertMeterHappy(m, role)
 % find here than in the CSV. On the 196 the U1 query returns the error
 % condition word, the model number and then one digit per error; anything
 % but zeros is a rejected command. On the 34401A SYST:ERR? pops one entry
-% off the error queue and a clean one reads +0.
+% off a queue and a clean one reads +0.
 %
-% This is the check both profiles lean on, neither having been read off its
-% manual. A letter or a keyword that is not one the instrument knows
-% becomes an error at configuration rather than a wrong number later.
+% The SCPI queue is drained rather than sampled. A setup that sends nine
+% commands can have several rejected, and popping one entry per run turns
+% bringing up a profile into one round trip per mistake.
 
-    D    = m.Ddc;
-    word = meterAsk(m, D.Error);
+    D = m.Ddc;
 
     if D.Dialect == "scpi"
-        happy = startsWith(word, D.NoError);
-    else
-        flags = extractAfter(word, D.IdPrefix);
-        happy = ~ismissing(flags) && strlength(flags) > 0 && ...
-                all(char(flags) == '0');
+        faults = scpiErrorQueue(m);
+        if isempty(faults)
+            return
+        end
+        error("PVLoad:MeterRejectedSetup", ...
+            "The %s meter (%s) answered %s with %s.", ...
+            role, m.Label, D.Error, strjoin("""" + faults + """", "; "));
     end
 
-    if ~happy
+    word  = meterAsk(m, D.Error);
+    flags = extractAfter(word, D.IdPrefix);
+
+    if ismissing(flags) || strlength(flags) == 0 || any(char(flags) ~= '0')
         error("PVLoad:MeterRejectedSetup", ...
             "The %s meter (%s) answered %s with ""%s"".", ...
             role, m.Label, D.Error, word);
+    end
+end
+
+function faults = scpiErrorQueue(m)
+% Pop until the queue reports empty. The 34401A holds 20 entries and
+% returns +0,"No error" once it is drained, so the loop is bounded twice
+% over; the counter is there for a meter that never says +0 rather than as
+% the real limit.
+
+    faults = strings(0, 1);
+
+    for k = 1:25
+        word = meterAsk(m, m.Ddc.Error);
+        if startsWith(word, m.Ddc.NoError)
+            return
+        end
+        faults(end+1, 1) = word;   %#ok<AGROW>
     end
 end
 
@@ -1724,13 +1768,6 @@ function range = pickVoltageRange(cfg)
     else
         range = min(fits);
     end
-end
-
-function meas = setCurrentRange(meas, iscExpected, cfg)
-    if ~meas.Enabled
-        return
-    end
-    configureMeter(meas.I, "current", pickCurrentRange(iscExpected, cfg));
 end
 
 function [volts, amps, fault] = readPoint(meas, cfg)
@@ -1809,11 +1846,11 @@ function value = meterDecode(m, reply)
     if m.Ddc.Dialect == "scpi"
         value = scpiDecode(reply, m.Ddc.Overflow);
     else
-        value = ddcDecode(reply);
+        value = ddcDecode(reply, m.Ddc.Prefixes);
     end
 end
 
-function value = ddcDecode(reply)
+function value = ddcDecode(reply, prefixes)
 % A reading carries its own status: N for normal or O for overflow, then
 % three letters for the function, then the mantissa and exponent. An
 % overflow comes back as NaN so the caller counts it as a fault, because it
@@ -1825,10 +1862,15 @@ function value = ddcDecode(reply)
 % for, and a status word left unread would otherwise parse as a perfectly
 % plausible number.
 %
-% Takes a string, not a port, so captured replies can drive it offline.
+% The tags come from the profile because they belong to the instrument, not
+% to the dialect. The 196 sends DCI for amps, figure 3-6; a decoder holding
+% another meter's list accepts the volts reading and rejects the current
+% one, which is the worst of both.
+%
+% Takes strings, not a port, so captured replies can drive it offline.
 
     text   = extractBefore(strtrim(string(reply)) + ",", ",");   % G2 suffix
-    prefix = regexp(text, "^[NO](DCV|DCA|OHM|DCC|DCX)", "match", "once");
+    prefix = regexp(text, "^[NO](" + prefixes + ")", "match", "once");
 
     if ismissing(prefix) || startsWith(prefix, "O")
         value = NaN;
@@ -1894,6 +1936,24 @@ function ddcTell(port, command)
 end
 
 function reply = ddcAsk(m, command)
+% Flushed first, because under T5 every command string this code sends ends
+% in an X and every X is a trigger. A setup string therefore leaves a
+% reading in the meter's output that nobody asked for, and the next query
+% reads that instead of its own answer. It is one behind from then on, and
+% it fails in the worst way: a status word query comes back with something
+% that parses as a plausible number.
+%
+% This is what U1 answering "NDCI-00.00009E-3" was, on the bench, at the
+% second configuration of the ammeter. The first configuration's X had
+% triggered a conversion and nothing had collected it.
+%
+% Discarding here rather than counting X's is deliberate. Whether a given
+% command string produces a reading depends on the trigger mode it is
+% itself setting up, so the count is not knowable from this side; what is
+% knowable is that a query's answer is the next thing the meter sends after
+% the query goes out.
+
+    flush(m.Port, "input");
     ddcTell(m.Port, command);
     reply = strtrim(string(readline(m.Port)));
     if strlength(reply) == 0
@@ -1965,11 +2025,6 @@ function results = runExperiment(board, meas, plan, cfg, log)
     else
         fprintf("Self-test skipped. The potentiometers are unverified.\n");
     end
-
-    % Once, not per point. A range change costs a fresh configuration, and
-    % 769 of those would be absurd; the range that fits is already known
-    % from ISC_FULL.
-    setCurrentRange(meas, cfg.Cell.IscFull, cfg);
 
     results = runSweep(board, meas, plan, cfg, log);
 

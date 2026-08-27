@@ -145,11 +145,71 @@ the jacks.
 
 ---
 
+## Both meters, `RUN = "meters"`
+
+The bench runs an Agilent 34401A on volts at `GPIB0::22::INSTR` and a Keithley
+196 on amps at `GPIB0::1::INSTR`, through one Keysight 82357B. `visadevlist`
+names the 34401A and leaves the 196's columns empty, which is what a meter with
+no `*IDN?` looks like.
+
+Both identify:
+
+| Query | Reply |
+|---|---|
+| `*IDN?` | `HEWLETT-PACKARD,34401A,0,11-5-2` |
+| `U0X` | `1961000000010000000043600000000` |
+
+Three faults came out of getting from there to ten readings. All three were in
+the script rather than on the bench, and the order they surfaced in matters,
+because two of them cancelled.
+
+**`TRIG:DEL AUTO` is not a 34401A command.** `SYST:ERR?` answered
+`-224,"Illegal parameter value"`. Manual page 80 gives `TRIGger:DELay
+{<seconds>|MINimum|MAXimum}` and `TRIGger:DELay:AUTO {OFF|ON}` as separate
+commands, so `AUTO` is a node and not a parameter. Corrected to
+`TRIG:DEL:AUTO ON`.
+
+**Under `T5` every command string leaves a reading behind.** The trailing `X`
+that executes a setup string is also the trigger, so the conversion it starts is
+never collected and the next query reads it instead of its own answer. This
+showed up as `U1` answering `NDCI-00.00009E-3`, a current reading where the
+error word should have been. Queries now flush the input first, and
+`configureMeter` flushes again when it is done, so the sweep starts on an empty
+buffer. The duplicate call that configured the ammeter twice is gone as well.
+
+**The 196 tags DC amps `DCI`.** Figure 3-6: `DCV`, `ACV`, `OHM`, `OCO`, `DCI`,
+`ACI`, `dBV`, `dBI`. The decoder had been matching `DCA`, which this meter never
+sends, so a current reading would have decoded to NaN. The tag list now lives in
+the profile.
+
+The run that produced ten clean readings did so with two of these still
+outstanding, which is worth remembering. A `flush` that cleared the output buffer
+as well as the input had discarded the `F3R3...` setup string, so the 196 was
+still in its power-on DC volts; `U1` then came back clean because no bad command
+had reached it, and the volts reading decoded because `DCV` was in the old tag
+list. The console read `I = -0.000400 A` and the number was a few hundred
+microvolts of float on an open input. **It was caught by looking at the front
+panel, which said volts on both meters.** Nothing in the software noticed.
+
+---
+
 ## Open
 
-**The 196 command profile past `U0` and `U1` is unverified.** `F2`, the range
-codes and `Z0B0G0M0K2S2T5` were inferred from the Keithley command family rather
-than read off the 196 manual. The first `RUN = "ohms"` exercises them.
+**The 196 command profile is now read off manual 196-901-01 Rev D**, not
+inferred: functions from section 3.9.2, ranges from table 3-9, the setup string
+from table 3-8, the 24 ms conversion from table 3-16, the reading tags from
+figure 3-6. Inference had the lowest amps range at 3 mA where it is 300 uA, and
+the conversion at 350 ms where it is 24 ms.
+
+**The input-only flush and the `DCI` tag have not been run on the bench.** They
+were written after the last session at the instruments. The check is one
+`RUN = "meters"`: the 196's front panel has to read amps, and the current column
+has to sit near zero on an open loop rather than at a few hundred micro-anything.
+
+**Overlapped reads are still assumed rather than shown.** Both meters have been
+triggered and collected together, but never against a source that would make a
+one-state lag visible. Step between two widely separated load states and see
+whether the reading follows.
 
 **`CELL_SETTLE` is zero and unmeasured.**
 
