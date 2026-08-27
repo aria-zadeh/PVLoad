@@ -157,6 +157,7 @@ independently.
 | `"wiper"` | Arduino | Park at the state pairs whose difference is one wiper resistance |
 | `"k3"` | Arduino | Four holds that say whether K3 closes |
 | `"verify"` | Arduino | Seven holds that exercise every part of a freshly built board |
+| `"ohms"` | Arduino, one electrometer | Measure every state in the sweep on ohms, write a CSV and save a plot |
 | `"edfa"` | amplifier | Identify, report temperature and status, ramp through configured levels |
 | `"meters"` | electrometers | Identify, configure, take ten readings |
 | `"sweep"` | all | Full experiment, written to CSV |
@@ -185,6 +186,7 @@ hardware.
 | `RUN` | Mode, per the table above |
 | `SERIAL_PORT`, `EDFA_PORT` | COM ports; enumerate with `serialportlist("available")` |
 | `DMM_V_ADDRESS`, `DMM_I_ADDRESS` | VISA resource strings; enumerate with `visadevlist` |
+| `DMM_R_ADDRESS` | VISA resource string of the single meter `"ohms"` uses; that mode ignores `DMM_ENABLED` |
 | `EDFA_ENABLED`, `DMM_ENABLED` | Which subsystems are attached |
 | `ISC_FULL`, `VOC_FULL`, `POWER_FULL` | Approximate cell behavior; sizes meter ranges and prints estimates. Only `ISC_FULL` and `VOC_FULL` past a range are errors |
 | `CAL_CURRENT_MA`, `CAL_POWER_MW` | Amplifier calibration arrays |
@@ -193,6 +195,7 @@ hardware.
 | `EDFA_WARMUP` | Hold at first level, in seconds |
 | `RAMP_STEPS`, `RAMP_DWELL` | States visited by `"ramp"` and how long each state is held |
 | `WIPER_CODES` | Codes `"wiper"` compares at |
+| `OHMS_SETTLE` | Per-state hold in `"ohms"` before the reading is triggered |
 | `SETTLE_TIME` | Per-state hold when no meters are attached |
 | `WRITE_CSV`, `OUT_DIR`, `RUN_TAG` | Output |
 
@@ -227,6 +230,23 @@ FULL(n) = K1 + Rw1 + n·s + Rw2
 Neither difference contains the leads, the jacks or K1. `Rw2` is a switch rather than a resistor,
 so the same value should come back at every code in `WIPER_CODES`; one that tracks the code is
 `R_AB` being wrong instead.
+
+### Measuring the load with one electrometer
+
+`RUN = "ohms"` is `"ramp"` with the copying down done by an instrument. It needs the Arduino and a
+single 617 on ohms across J1 and J3, with no cell, no amplifier, and no second meter, so
+`DMM_ENABLED` stays out of it and `DMM_R_ADDRESS` says which meter to open. Every one of the 769
+states is visited once, held for `OHMS_SETTLE`, and read.
+
+The output is two files under `OUT_DIR`, sharing one timestamp: `pvload_<stamp>_ohms.csv` with a row
+per state, and `pvload_<stamp>_ohms.png` plotting measured resistance against the model on log axes,
+with the ratio of the two below it. A ratio of 1 is agreement.
+
+The 617 has no ohms range below 2 kΩ, so `DMM_R_RANGE` defaults to the instrument's own autorange
+and the bottom of the sweep is measured on the coarsest part of the most sensitive range. Points the
+meter returns as zero or negative stay in the CSV and are counted on the console rather than plotted.
+A reading carries the leads, the jacks and the traces exactly as a handheld does, so a constant few
+ohms across every point is the wiring.
 
 `R_WIPER` is 155 Ω per device, measured with `RUN = "verify"` on the assembled board and recorded
 in [docs/BRINGUP.md](docs/BRINGUP.md). `CELL_SETTLE` is still a placeholder at zero, and it is the
