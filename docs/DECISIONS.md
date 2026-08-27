@@ -29,6 +29,19 @@ resistance, which the datasheet does not characterise at a 24 V span, so the
 duplicates were never confirmed to be duplicates. Resistance is read from the
 meters, so extra points cost only run time.
 
+What it buys is smaller than the state count suggests. The extra points do not
+sit in the middle of the gaps, they sit next to points that already exist: the
+sorted sequence is pairs about 2 ohm apart separated by gaps of about 17.6 ohm.
+The number that matters is the largest gap, and it falls from 19.6 ohm to
+17.6 ohm. That is 10%, not the factor of two that an evenly interleaved second
+ladder would give.
+
+The best case is a wiper resistance near half a step, 9.8 ohm, which splits every
+gap in two. 155 ohm is 7.9 steps, close to a whole number, so the two ladders
+nearly coincide. Nothing in software changes this: 19.6 ohm is 5 kohm over 255
+steps and is fixed by the part. Finer steps need a lower-value pot, which costs
+range, or more pots in series, each adding another offset.
+
 ## Order by estimate, select by structure
 
 The nominal resistance model sorts the sweep low to high and labels the progress

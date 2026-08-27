@@ -17,11 +17,14 @@ clc;
 %   "k3"      board only, four holds that say whether K3 closes
 %   "verify"  board only, seven holds that between them exercise every
 %             part of the board. the check for a freshly built one.
+%   "ohms"    board and one electrometer on ohms across J1 and J3. every
+%             state in the sweep is measured, written to CSV and plotted.
+%             no cell, no amplifier, one meter.
 %   "edfa"    amplifier only
 %   "meters"  electrometers only
 %   "sweep"   the full experiment, written to CSV
 
-RUN = "ramp";  
+RUN = "meters";  
 
 
 % Ports and addresses, and what each one needs on the bench. Wiring and the
@@ -50,6 +53,12 @@ EDFA_PORT     = "COM5";              % amplifier port
 DMM_ENABLED   = false;               % set to true if electrometers enabled
 DMM_V_ADDRESS = "GPIB0::22::INSTR";  % meter across the cell
 DMM_I_ADDRESS = "GPIB0::23::INSTR";  % meter in series with PV+
+
+DMM_R_ADDRESS = "GPIB0::22::INSTR";  % the one meter RUN "ohms" uses, on
+                                     % ohms across J1 and J3. that mode
+                                     % ignores DMM_ENABLED, so a bench with
+                                     % a single electrometer runs it with
+                                     % the sweep meters still switched off.
 
 
 
@@ -117,6 +126,13 @@ RAMP_DWELL = 1.0;          % s each state is held, in "ramp" and "wiper"
                            % both. an autoranging handheld needs a second
                            % or two to re-range and you need longer than
                            % that to write the number down.
+
+OHMS_SETTLE = 0.5;         % s each state is held in RUN "ohms" before the
+                           % reading is triggered. the conversion follows
+                           % it, so a state costs this plus about 0.4 s and
+                           % the 769 of them take roughly twelve minutes.
+                           % autoranging needs most of this; a fixed
+                           % DMM_R_RANGE runs happily at 0.1.
 
 WIPER_CODES = [0 255];
                            % code sums RUN "wiper" compares at. a wiper
@@ -210,6 +226,20 @@ DMM_I_RANGE      = 0;              % A, or 0 to pick per level from ISC_FULL
 DMM_I_RANGES     = [2e-12 2e-11 2e-10 2e-9 2e-8 2e-7 2e-6 2e-5 ...
                     2e-4 2e-3 2e-2];
                                    % amps ranges R1 to R11, table 3-12.
+DMM_R_RANGE      = 0;              % ohm, or 0 for the 617's own autorange.
+                                   % the sweep covers five decades, so one
+                                   % fixed range cannot hold all of it and
+                                   % autorange is the default. a fixed
+                                   % range is better where it fits: the
+                                   % zero correction below belongs to one
+                                   % range, and autoranging leaves it on
+                                   % whichever range it was taken on.
+DMM_R_RANGES     = [2e3 2e4 2e5 2e6 2e7 2e8 2e9 2e10 2e11];
+                                   % ohms ranges R1 to R9, 2 kohm upwards
+                                   % by decades. nothing below 2 kohm
+                                   % exists, so the bottom of the sweep is
+                                   % measured on the coarsest part of the
+                                   % most sensitive range.
 DMM_PARALLEL     = true;           % trigger both meters, then collect both
 DMM_MAX_FAULTS   = 5;              % consecutive read failures before abort
 
@@ -225,7 +255,9 @@ DMM_MAX_FAULTS   = 5;              % consecutive read failures before abort
 DDC = struct( ...
     'Volts',     "F0", ...
     'Amps',      "F1", ...
+    'Ohms',      "F2", ...
     'Range',     "R%d", ...
+    'AutoRange', "R0", ...
     'ZeroCheck', "C%d", ...
     'ZeroCorr',  "Z%d", ...
     'Common',    "N0D0B0Q7O0G0M0K2T5", ...
@@ -276,6 +308,7 @@ cfg = struct( ...
     'SelfTest',      SELF_TEST, ...
     'RampSteps',     RAMP_STEPS, ...
     'RampDwell',     RAMP_DWELL, ...
+    'OhmsSettle',    OHMS_SETTLE, ...
     'WiperCodes',    WIPER_CODES, ...
     'RabNominal',    R_AB_NOMINAL, ...
     'WiperSteps',    WIPER_STEPS, ...
@@ -318,6 +351,7 @@ cfg.Dmm = struct( ...
     'Enabled',     DMM_ENABLED, ...
     'VAddress',    DMM_V_ADDRESS, ...
     'IAddress',    DMM_I_ADDRESS, ...
+    'RAddress',    DMM_R_ADDRESS, ...
     'Timeout',     DMM_TIMEOUT, ...
     'Conversion',  DMM_CONVERSION, ...
     'ZeroCorrect', DMM_ZERO_CORRECT, ...
@@ -325,6 +359,8 @@ cfg.Dmm = struct( ...
     'VRanges',     DMM_V_RANGES, ...
     'IRange',      DMM_I_RANGE, ...
     'IRanges',     DMM_I_RANGES, ...
+    'RRange',      DMM_R_RANGE, ...
+    'RRanges',     DMM_R_RANGES, ...
     'Parallel',    DMM_PARALLEL, ...
     'MaxFaults',   DMM_MAX_FAULTS, ...
     'Ddc',         DDC);
@@ -351,6 +387,7 @@ switch cfg.Run
     case "wiper",  runWiperCheck(cfg);
     case "k3",     runK3Check(cfg);
     case "verify", runVerify(cfg);
+    case "ohms",   runOhmsSweep(cfg);
     case "edfa",   runEdfaCheck(cfg);
     case "meters", runMeterCheck(cfg);
     case "sweep",  results = runSweepAll(cfg);
@@ -623,6 +660,191 @@ function runK3Check(cfg)
     fprintf("\nDone. Returned to OPEN.\n");
 end
 
+function runOhmsSweep(cfg)
+% Board and one electrometer, with the meter on ohms across J1 and J3 and
+% no cell in the loop. Every state in the sweep is visited once and the
+% meter reads the load directly, so the resistance comes off an instrument
+% instead of off the model.
+%
+% This does what "ramp" does without a human copying numbers off a
+% handheld, which is the only reason it needs a meter at all. The reading
+% carries the leads, the jacks and the traces the same way a handheld does,
+% so a constant offset of a few ohms across every point is the wiring and
+% not the board.
+%
+% One meter, so DMM_ENABLED stays out of it: that flag says whether the
+% pair the sweep needs is attached, and this mode needs neither of them in
+% particular. It touches no laser.
+
+    plan  = buildSweepPlan(cfg);
+    board = connectBoard(cfg);
+    meter = openMeter(cfg, cfg.Dmm.RAddress, "ohms");
+    guard = onCleanup(@() ohmsShutdown(board, meter));
+
+    fprintf("Board connected on %s.\n", cfg.SerialPort);
+    enterSafeState(board);
+
+    if cfg.SelfTest
+        selfTestPotentiometers(board);
+    end
+
+    fprintf("Ohms meter: %s\n", identifyMeter(meter, "ohms", cfg));
+    configureMeter(meter, "ohms", cfg.Dmm.RRange, cfg);
+
+    fprintf("\n%d states, about %.0f s in total.\n", numel(plan), ...
+        numel(plan) * (cfg.OhmsSettle + cfg.Dmm.Conversion));
+    fprintf("Meter goes on J1 and J3, set to ohms, with no cell connected.\n\n");
+
+    measured = nan(numel(plan), 1);
+    stamps   = NaT(numel(plan), 1);
+    faults   = 0;
+    run      = 0;
+
+    for k = 1:numel(plan)
+        applyState(board, plan(k), cfg.OhmsSettle);
+        [measured(k), bad] = readOhms(meter);
+        stamps(k) = datetime("now");
+
+        if bad
+            faults = faults + 1;
+            run    = run + 1;
+            % Same rule the sweep uses: the first point failing is the
+            % wiring or the address, not a glitch.
+            if k == 1 || run > cfg.Dmm.MaxFaults
+                error("PVLoad:MeterUnresponsive", ...
+                    "The meter failed %d reading(s) in a row at state %d " + ...
+                    "of %d. Check the cabling and the address.", ...
+                    run, k, numel(plan));
+            end
+        else
+            run = 0;
+        end
+
+        if cfg.PrintStatus
+            fprintf("  [%4d/%4d] %-5s  U1=%3d  U2=%3d  model ~%9.1f ohm" + ...
+                "   meter %11.1f ohm\n", k, numel(plan), plan(k).Mode, ...
+                plan(k).Code1, plan(k).Code2, plan(k).Resistance, measured(k));
+        end
+    end
+
+    enterSafeState(board);
+    clear guard;
+
+    fprintf("\n%d state(s) measured, %d read fault(s).\n", ...
+        numel(plan), faults);
+    writeOhmsRun(cfg, plan, measured, stamps);
+end
+
+function [ohms, fault] = readOhms(meter)
+% One meter, so there is nothing to overlap and the trigger is a bare X.
+% A timeout comes back NaN and is counted rather than thrown, the same way
+% the sweep treats a dropped point.
+
+    ohms  = NaN;
+    fault = false;
+
+    try
+        ddcTell(meter, "");
+        ohms = k617Decode(readline(meter));
+    catch
+        fault = true;
+    end
+
+    fault = fault || isnan(ohms);
+end
+
+function ohmsShutdown(board, meter)
+    quietly(@() enterSafeState(board));
+    quietly(@() delete(meter));
+end
+
+function writeOhmsRun(cfg, plan, measured, stamps)
+% CSV and plot share a stamped base name, so the two halves of one run stay
+% together and a later run cannot overwrite either.
+
+    if ~cfg.Out.WriteCsv
+        fprintf("WRITE_CSV is false, so nothing was saved.\n");
+        return
+    end
+
+    dir = resolvePath(cfg.Out.Dir);
+    if ~isfolder(dir)
+        mkdir(dir);
+    end
+
+    tag = cfg.Out.Tag;
+    if strlength(tag) > 0
+        tag = "_" + tag;
+    end
+    base = string(fullfile(dir, "pvload_" + ...
+        string(datetime("now", "Format", "yyyyMMdd_HHmmss")) + tag + "_ohms"));
+
+    t = table(stamps, (1:numel(plan))', [plan.Mode]', [plan.Code1]', ...
+        [plan.Code2]', [plan.Resistance]', measured, ...
+        'VariableNames', {'timestamp', 'state_index', 'mode', 'u1_code', ...
+            'u2_code', 'r_model_ohm', 'r_measured_ohm'});
+    writetable(t, base + ".csv");
+
+    plotOhmsRun(plan, measured, base + ".png");
+
+    fprintf("Readings: %s\n", base + ".csv");
+    fprintf("Plot:     %s\n", base + ".png");
+end
+
+function plotOhmsRun(plan, measured, path)
+% Log axes because the sweep spans five decades, and the model plotted
+% alongside because the interesting part is where the two part company.
+%
+% The lower axes is the ratio rather than a difference or a percentage.
+% Both of those are dominated by one end of the sweep: the SHORT state
+% models at 0.150 ohm, so any offset at all is thousands of a percent
+% there, and R_AB's 20% at the top is tens of kohm. A ratio on a log axis
+% holds the whole range at once, and 1 is agreement.
+%
+% Nothing is clipped. A reading the log axes cannot show is one the meter
+% returned as zero or negative, which happens at the bottom of the sweep
+% where the load is far below the 617's most sensitive ohms range, so the
+% count is printed rather than quietly dropped.
+
+    model = [plan.Resistance]';
+    index = (1:numel(plan))';
+    ratio = measured ./ model;
+
+    fig = figure("Name", "PVLoad resistance sweep", "Color", "w");
+    layout = tiledlayout(fig, 2, 1, "TileSpacing", "compact", ...
+        "Padding", "compact");
+
+    ax1 = nexttile(layout);
+    semilogy(ax1, index, model, "-", "LineWidth", 1.0, ...
+        "DisplayName", "model");
+    hold(ax1, "on");
+    semilogy(ax1, index, measured, ".", "MarkerSize", 6, ...
+        "DisplayName", "measured");
+    hold(ax1, "off");
+    grid(ax1, "on");
+    ylabel(ax1, "resistance, ohm");
+    legend(ax1, "Location", "northwest");
+    title(ax1, sprintf("%d states, J1 to J3", numel(plan)));
+
+    ax2 = nexttile(layout);
+    semilogy(ax2, index, ratio, ".", "MarkerSize", 6);
+    yline(ax2, 1, "-");
+    grid(ax2, "on");
+    xlabel(ax2, "state index, ordered by the model");
+    ylabel(ax2, "meter / model");
+
+    linkaxes([ax1 ax2], "x");
+    xlim(ax1, [1 numel(plan)]);
+
+    exportgraphics(fig, path, "Resolution", 200);
+
+    hidden = sum(~(ratio > 0));
+    if hidden > 0
+        fprintf("%d point(s) read zero, negative or not at all and are " + ...
+            "in the CSV but not on the lower axes.\n", hidden);
+    end
+end
+
 function k = findState(plan, mode, code, cfg)
 % Pulled out of the plan rather than rebuilt, so this mode cannot drift
 % away from the resistance model the sweep uses.
@@ -806,8 +1028,8 @@ function assertConfig(cfg)
 % Catches a mistyped config block before anything is energised.
 
     mustBeOneOf(cfg.Run, ...
-        ["plan" "board" "ramp" "wiper" "k3" "verify" "edfa" "meters" ...
-         "sweep"], "RUN");
+        ["plan" "board" "ramp" "wiper" "k3" "verify" "ohms" "edfa" ...
+         "meters" "sweep"], "RUN");
 
     if cfg.RampSteps < 2 || cfg.RampSteps > 769
         error("PVLoad:BadRampSteps", ...
@@ -816,6 +1038,9 @@ function assertConfig(cfg)
     end
     if cfg.RampDwell <= 0
         error("PVLoad:BadRampDwell", "RAMP_DWELL must be positive.");
+    end
+    if cfg.OhmsSettle <= 0
+        error("PVLoad:BadOhmsSettle", "OHMS_SETTLE must be positive.");
     end
     if isempty(cfg.WiperCodes) || any(cfg.WiperCodes < 0) || ...
        any(cfg.WiperCodes > 2 * cfg.WiperSteps) || ...
@@ -868,6 +1093,11 @@ function assertConfig(cfg)
         if D.IRange > 0
             rangeCode(D.IRange, D.IRanges, "DMM_I_RANGE");
         end
+    end
+    % Not gated on D.Enabled: RUN "ohms" uses one meter and that flag is
+    % about the pair the sweep needs.
+    if D.RRange > 0
+        rangeCode(D.RRange, D.RRanges, "DMM_R_RANGE");
     end
     if D.Enabled && cfg.Levels.VocFull > D.VRange
         error("PVLoad:VocAboveMeterRange", ...
@@ -1678,12 +1908,23 @@ function configureMeter(handle, role, range, cfg)
 
     D = cfg.Dmm.Ddc;
 
-    if role == "voltage"
-        command = D.Volts + ...
-            sprintf(D.Range, rangeCode(range, cfg.Dmm.VRanges, "DMM_V_RANGE"));
-    else
-        command = D.Amps + ...
-            sprintf(D.Range, rangeCode(range, cfg.Dmm.IRanges, "DMM_I_RANGE"));
+    switch role
+        case "voltage"
+            command = D.Volts + sprintf(D.Range, ...
+                rangeCode(range, cfg.Dmm.VRanges, "DMM_V_RANGE"));
+        case "ohms"
+            % The only place autorange is used. A sweep of five decades has
+            % no fixed range that holds it, and unlike the ammeter in a
+            % sweep there is no cell being loaded while the meter hunts.
+            if range > 0
+                command = D.Ohms + sprintf(D.Range, ...
+                    rangeCode(range, cfg.Dmm.RRanges, "DMM_R_RANGE"));
+            else
+                command = D.Ohms + D.AutoRange;
+            end
+        otherwise
+            command = D.Amps + sprintf(D.Range, ...
+                rangeCode(range, cfg.Dmm.IRanges, "DMM_I_RANGE"));
     end
 
     ddcTell(handle, command + D.Common);

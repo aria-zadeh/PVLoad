@@ -88,6 +88,7 @@ docs/
   HARDWARE.md      Topology, pin map, SPI protocol, BOM
   DECISIONS.md     Design rationale and open questions
   BRINGUP.md       What has been measured on the assembled board
+  TROUBLESHOOTING.md  Finding a fault with a handheld meter
   PVLoad_BenchCard.pdf   One-page printable bench reference
   benchcard.html   Source for the bench card
   img/             Schematic and PCB renders
