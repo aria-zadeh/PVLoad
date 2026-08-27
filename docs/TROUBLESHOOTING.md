@@ -3,6 +3,9 @@
 How to find a fault on an assembled board with a handheld meter and nothing else.
 What has actually been found this way is in [BRINGUP.md](BRINGUP.md).
 
+The last two sections cover the host instead of the board: getting MATLAB to see
+the meter at all, and getting the first read off it.
+
 ---
 
 ## Measure differences, not readings
@@ -139,3 +142,75 @@ pair is COM and NO. Energise the coil and measure COM to NO.
 middle is base, right is collector. Confirm without trusting that: the emitter
 has continuity to ground, the base is the leg with the 1 kohm resistor, the
 collector runs to the relay.
+
+---
+
+## MATLAB cannot see a meter that Connection Expert can
+
+The symptom is a clean split. Keysight Connection Expert lists the instrument
+and reads it. MATLAB reports no VISA resources at all:
+
+```
+instrhwinfo('visa')            {'ni'}
+visadevlist                    Unable to find any VISA resources ...
+visadev('GPIB0::1::INSTR')     Resource string is invalid or resource was not found
+```
+
+The cause is not VISA configuration. The conflict manager, the preferred
+implementation, `ConflictTbl.xml`, the registry and repeated reboots were all
+ruled out, and every Keysight DLL loads and is the right architecture.
+
+The cause is the C++ runtime. `MATLAB.exe` lives in `bin\win64`, and Windows
+searches a program's own directory first, so the `MSVCP140.dll` that MATLAB
+ships there is the one every MATLAB process loads. Keysight IO Libraries is
+built against a newer runtime than MATLAB carries. `ktvisa32.dll` then fails its
+initialisation with Win32 error 1114, `mwagilentvisa.dll` fails with it, and
+MATLAB concludes Keysight VISA is not installed. Connection Expert is a separate
+program and loads the system runtime, which is why it works.
+
+Confirm it in three steps.
+
+Compare the two copies. The one under MATLAB will be older:
+
+```
+C:\Program Files\MATLAB\R2022a\bin\win64\MSVCP140.dll
+C:\Windows\System32\MSVCP140.dll
+```
+
+Ask MATLAB to load the adaptor directly. The message names the failure mode,
+which the toolbox otherwise hides behind "not installed properly":
+
+```matlab
+java.lang.System.load(fullfile(matlabroot, 'toolbox', 'instrument', ...
+    'instrumentadaptors', 'win64', 'mwagilentvisa.dll'))
+```
+
+A dependency that is merely absent gives "module could not be found". This gives
+"A dynamic link library (DLL) initialization routine failed", which means the
+library was found, mapped, and refused to start.
+
+Reproduce it outside MATLAB. In a plain PowerShell window, `LoadLibrary` on
+`ktvisa32.dll` succeeds. Do it again after loading MATLAB's `MSVCP140.dll` first
+and it fails with 1114.
+
+The fix is to replace the eight VC++ 14.x files in `bin\win64` with the System32
+copies: `msvcp140`, `msvcp140_1`, `msvcp140_2`, `msvcp140_codecvt_ids`,
+`vcruntime140`, `vcruntime140_1`, `concrt140` and `vccorlib140`. Back the
+originals up first. This changes no MATLAB code and no licensing; the files are
+Microsoft's, and Microsoft states that a program built against an older 14.x
+runtime runs against a newer one.
+
+It worked when `instrhwinfo('visa')` lists `keysight` and `visadevlist` shows the
+instrument. A MATLAB repair or reinstall puts the old files back and returns the
+fault.
+
+## The first read after opening a meter times out
+
+Both meters talk continuously, so `visadev` can open partway through a reading.
+The first `readline` then waits for a line ending that has already gone past, and
+times out however long the timeout is. Every read after that is fine, which makes
+it look intermittent when it is not.
+
+`flush` the session immediately after opening it. `openMeter` does this. The
+write terminator is not involved: `CR/LF` and `LF` behave identically, with and
+without the flush.

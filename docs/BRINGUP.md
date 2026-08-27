@@ -37,6 +37,36 @@ before it is chased into the board.
 
 ---
 
+## Host and meter link
+
+MATLAB reaches the meter. The adapter is a Keysight 82357B and the bus runs on
+Keysight IO Libraries, so `instrhwinfo('visa')` lists `agilent`, `keysight` and
+`ni`, and `visadevlist` returns one instrument at `GPIB0::1::INSTR`. Getting
+there needed the C++ runtime fix in [TROUBLESHOOTING.md](TROUBLESHOOTING.md);
+none of it was a VISA setting.
+
+The instrument answers, and it is the 196:
+
+| Query | Reply |
+|---|---|
+| `U0X` | `1961000000010000000043600000000` |
+| `U1X` | `196000000000000000000000000` |
+| bare read | `NDCV-000.0001E+0` |
+
+`U0` opens with the model number, which agrees with `DMM_MODEL = "196"` and with
+`DMM_R_ADDRESS`. `U1` is all zeros after the prefix, so nothing is latched. The
+reading is DC volts at −0.1 mV, which is the meter sitting on its own leads.
+
+What that does not prove: only `U0` and `U1` have been sent. The rest of the 196
+profile, `F2` for ohms and the setup string `Z0B0G0M0K2S2T5`, has never reached
+the instrument. The first `RUN = "ohms"` is what tests it, and the `U1` query
+that follows the setup string is what catches a letter the 196 does not take.
+
+A fresh session has to be flushed before the first read or that read times out.
+Reproduced on every run, both write terminators. `openMeter` flushes.
+
+---
+
 ## Board 2, `RUN = "verify"`
 
 | Hold | State | Measured | Proves |
@@ -116,6 +146,10 @@ the jacks.
 ---
 
 ## Open
+
+**The 196 command profile past `U0` and `U1` is unverified.** `F2`, the range
+codes and `Z0B0G0M0K2S2T5` were inferred from the Keithley command family rather
+than read off the 196 manual. The first `RUN = "ohms"` exercises them.
 
 **`CELL_SETTLE` is zero and unmeasured.**
 
