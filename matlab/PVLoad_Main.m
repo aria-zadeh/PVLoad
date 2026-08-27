@@ -21,7 +21,7 @@ clc;
 %   "meters"  electrometers only
 %   "sweep"   the full experiment, written to CSV
 
-RUN = "verify";  
+RUN = "ramp";  
 
 
 % to find com ports: serialportlist("available")
@@ -96,9 +96,9 @@ PRINT_STATUS = true;       % echo each state. off for long unattended runs.
 SELF_TEST    = true;       % probe both pots over SPI first. false to test
                            % the flow on a bare Arduino with no board.
 
-RAMP_STEPS = 80;           % states RUN "ramp" visits, spread evenly across
+RAMP_STEPS = 769;           % states RUN "ramp" visits, spread evenly across
                            % the sweep. 2 to 769.
-RAMP_DWELL = 4.0;          % s each state is held, in "ramp" and "wiper"
+RAMP_DWELL = 1.0;          % s each state is held, in "ramp" and "wiper"
                            % both. an autoranging handheld needs a second
                            % or two to re-range and you need longer than
                            % that to write the number down.
