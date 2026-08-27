@@ -12,7 +12,7 @@
 <style>
   @page { size: A4; margin: 10mm 11mm; }
   * { box-sizing: border-box; }
-  body { font: 8.1pt/1.3 "Segoe UI", Arial, sans-serif; color: #111; margin: 0; }
+  body { font: 8.4pt/1.32 "Segoe UI", Arial, sans-serif; color: #111; margin: 0; }
   h1 { font-size: 13pt; margin: 0 0 7px; letter-spacing: -0.2px; }
   h2 {
     font-size: 8pt; margin: 0 0 4px; font-weight: 700;
@@ -44,7 +44,7 @@
 
 <section>
 <h2>Wiring the Arduino</h2>
-<p>Ten wires from the Arduino to the 10-pin header on the board. Pin 1 is the square pad.</p>
+<p>Connect ten wires from the Arduino to the 10-pin header on the board. Pin 1 is the square pad.</p>
 <table>
 <tr><td class="n">1</td><td class="a">5V</td><td>5 V</td></tr>
 <tr><td class="n">2</td><td class="a">GND</td><td>GND</td></tr>
@@ -65,8 +65,8 @@
 <h2>The three banana jacks</h2>
 <p><b>J1</b>, red. PV+, the cell's positive.</p>
 <p><b>J2</b>, red. +24 V from the bench supply.</p>
-<p><b>J3</b>, black. Ground. The supply's negative and the cell's negative both go here. Use a
-stacking plug so they are not jammed in together.</p>
+<p><b>J3</b>, black. Ground. Connect both the supply negative and the cell negative here. Use a
+stacking plug. Do not force two plugs into one jack.</p>
 </section>
 
 <section>
@@ -93,89 +93,81 @@ stacking plug so they are not jammed in together.</p>
 
 <section>
 <h2>What on and off mean</h2>
-<p>You never unplug anything from the board to switch a rail. The supply leads stay in J2 and J3.
-The ten header wires stay on the Arduino.</p>
-<p class="gap"><b>24 V on and off</b> is the output button on the bench supply. If yours has no output
-button, put the black lead in J3 first, and pushing the red into J2 is the on step.</p>
-<p><b>5 V on and off</b> is the USB cable, pulled out at the laptop end. Stop the script before you
-pull it.</p>
+<p>Do not unplug anything from the board to turn a supply on or off. The supply leads stay in J2 and
+J3. The ten header wires stay on the Arduino.</p>
+<p class="gap"><b>For 24 V</b>, press the output button on the bench supply. If the supply has no
+output button, put the black lead in J3 first, then push the red lead into J2.</p>
+<p><b>For 5 V</b>, plug or unplug the USB cable at the laptop end. Stop the script first.</p>
 </section>
 
 <section>
 <h2>Using the handheld meter</h2>
-<p>Black lead into the socket marked <b>COM</b>. Red lead into the socket marked <b>V&#8486;</b>.
-Never the <b>10A</b> socket: in that one the meter is a plain piece of wire and you would be shorting
-J1 to J3.</p>
+<p>Put the black lead in the socket marked <b>COM</b>. Put the red lead in the socket marked
+<b>V&#8486;</b>. Never use the <b>10A</b> socket. That socket makes the meter a piece of wire and
+shorts J1 to J3.</p>
 <p>Turn the dial to <b>ohms</b> (&#8486;) to read the board's resistance across J1 and J3. Turn it to
 <b>DC volts</b> (V with a straight line over dashes) to probe pins against ground.</p>
 </section>
 
 <section>
 <h2>Cables to the laptop</h2>
-<p><b>Arduino.</b> Normal USB printer cable, A to B.</p>
-<p><b>EDFA100P laser.</b> Normal USB cable. Nothing special.</p>
-<p><b>Bench supply.</b> Two banana leads to J2 and J3. Set 24.0 V with a current limit of about
-100 mA.</p>
-<p class="gap"><b>The two Keithley 617 meters.</b> These have no USB. They only have a GPIB socket,
-the wide connector with two screws. You need one USB to GPIB adapter, National Instruments brand.
-Plug the adapter into the laptop and run a GPIB cable to the first meter. GPIB connectors stack on
-top of each other, so a second GPIB cable goes from the first meter to the second. Both meters share
-the one adapter.</p>
-<p>Before connecting them, give each meter a different address from its front panel. They both arrive
-set to 27, which does not work with two on the same cable. Set the volts meter to <b>22</b> and the
-amps meter to <b>23</b>.</p>
+<p><b>Arduino.</b> A standard USB printer cable, A to B.</p>
+<p><b>EDFA100P laser.</b> A standard USB cable.</p>
+<p><b>Bench supply.</b> Two banana leads to J2 and J3. Set 24.0 V and a current limit near 100 mA.</p>
+<p class="gap"><b>The two Keithley 617 meters.</b> These have no USB. They have one GPIB socket, the
+wide connector with two screws. Use a single USB to GPIB adapter, National Instruments brand. Plug the
+adapter into the laptop. Run a GPIB cable from the adapter to the first meter. GPIB connectors stack,
+so run a second GPIB cable from the first meter to the second. Both meters share the one adapter.</p>
+<p>Set a different address on each meter before you connect them. Both meters arrive on address 27,
+and two meters cannot share one address. Set the volts meter to <b>22</b> and the amps meter to
+<b>23</b>.</p>
 </section>
 
 <section>
 <h2>Connecting the 617 meters to the cell</h2>
-<p>The front socket marked <span class="mono">INPUT</span> is triaxial, so a banana plug will not fit.
-Screw on a triax to dual banana adapter. You now have two ordinary banana posts, <b>HI</b> and
-<b>LO</b>.</p>
+<p>The front socket marked <span class="mono">INPUT</span> is triaxial, so a banana plug does not fit.
+Screw on a triax to dual banana adapter. This gives you two banana posts, <b>HI</b> and <b>LO</b>.</p>
 
-<p class="gap"><b>The amps meter goes inside the wire.</b> Current has to flow through it, so cut the
-wire running from the cell's + terminal to J1 and put the meter in the break.</p>
+<p class="gap"><b>The amps meter goes inside the wire.</b> Current must flow through the meter. Cut
+the wire from the cell's + terminal to J1 and put the meter in the break.</p>
 <div class="wire">cell +&nbsp;&nbsp; &rarr;&nbsp; HI post<br>LO post&nbsp; &rarr;&nbsp; J1</div>
 
-<p><b>The volts meter goes across the cell.</b> Nothing is cut. Two leads just touch the cell's
-terminals.</p>
+<p><b>The volts meter goes across the cell.</b> Cut nothing. Two leads touch the cell's terminals.</p>
 <div class="wire">HI post&nbsp; &rarr;&nbsp; cell +<br>LO post&nbsp; &rarr;&nbsp; cell &minus;</div>
-<p>Clip these onto the cell's own leads, not onto J1 and J3. On the jacks you would be measuring
-through the amps meter as well and the reading comes out low.</p>
+<p>Clip these to the cell's own leads, not to J1 and J3. On the jacks the reading passes through the
+amps meter and comes out low.</p>
 </section>
 
 <section>
 <h2>Using the 617 meters</h2>
-<p>Power switch is on the front.</p>
-<p>On power up the meter sits in Volts with <b>ZERO CHECK</b> engaged. While ZERO CHECK is on it reads
-zero whatever is connected to it. Press the ZERO CHECK button to release it before measuring by hand.
-The script does this itself when it is driving the meter.</p>
-<p>The function buttons pick V, A, ohms or coulombs. The script sets these too.</p>
-<p class="gap"><b>To set the GPIB address:</b> press SELECT repeatedly until IEEE appears, set the
-number with the ADJUST arrows, then press SHIFT followed by SELECT to store and exit.</p>
-<p><b>REMOTE</b> lights up while the laptop is driving the meter. Press LOCAL to take manual control
-back.</p>
+<p>The power switch is on the front.</p>
+<p>At power up the meter is set to Volts and <b>ZERO CHECK</b> is on. With ZERO CHECK on, the meter
+reads zero whatever you connect. Press ZERO CHECK to turn it off before you measure by hand. The
+script turns it off itself when it drives the meter.</p>
+<p>The function buttons select V, A, ohms or coulombs. The script sets these too.</p>
+<p class="gap"><b>To set the GPIB address:</b> press SELECT until IEEE appears. Set the number with the
+ADJUST arrows. Press SHIFT, then SELECT, to store and exit.</p>
+<p><b>REMOTE</b> lights while the laptop drives the meter. Press LOCAL to take manual control back.</p>
 </section>
 
 <section>
 <h2>The laser interlock</h2>
-<p>Small connector on the back of the amplifier. It is a safety cutout, meant to be wired to a door
-switch so the laser dies when the door opens. Plug in the small shorting plug that came with the unit.
-Left empty, the laser will not fire at all.</p>
+<p>A small connector on the back of the amplifier. It is a safety cutout for a door switch. Plug in
+the shorting plug supplied with the unit. If the connector is empty, the laser does not fire.</p>
 </section>
 
 <section>
 <div class="flag">
-<b>LASER SAFETY.</b> Class 3B, 1550 nm. You cannot see it. It puts out up to 30 mW any time it is
-enabled, at any pump current, even with nothing going into it. Terminate the output. Never look into
-the fibre.
+<b>LASER SAFETY.</b> Class 3B, 1550 nm. You cannot see this light. The amplifier emits up to 30 mW
+whenever it is enabled, at any pump current, and with no optical input. Terminate the output. Never
+look into the fibre.
 </div>
 </section>
 
 <section>
 <div class="flag">
-<b>DO NOT.</b> Never have the cell connected and lit while the 24 V is off. With 5 V up and 24 V
-missing, the cell's current goes straight into the chip and destroys it. That is why the cell goes on
-last and comes off first.
+<b>DO NOT.</b> Never leave the cell connected and lit while 24 V is off. If 5 V is on and 24 V is off,
+the cell's current flows into the chip and destroys it. Connect the cell last and disconnect it first.
 </div>
 </section>
 
