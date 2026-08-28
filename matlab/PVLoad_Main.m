@@ -1,4 +1,4 @@
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % TO STOP: press Ctrl-C ONCE and wait about three seconds.
 %
 % The cleanup handler returns the board to OPEN. 
@@ -71,6 +71,11 @@ DMM_R_ADDRESS = "GPIB0::1::INSTR";  % the one meter RUN "ohms" uses, on
 
 ISC_FULL = 0.016;          % A, short-circuit current under that light
 VOC_FULL = 9;              % V, open-circuit voltage under that light
+
+CELL_AREA_CM2 = 0;         % cm2 of illuminated cell, or 0 if not known.
+                           % decides whether the figure carries current or
+                           % current density, which is what a paper
+                           % reports. labels output and nothing else.
 
 
 
@@ -394,7 +399,8 @@ cfg = struct( ...
 
 cfg.Cell = struct( ...
     'IscFull', ISC_FULL, ...
-    'VocFull', VOC_FULL);
+    'VocFull', VOC_FULL, ...
+    'AreaCm2', CELL_AREA_CM2);
 
 % Each meter gets one spec holding everything about it: its profile, where
 % it lives, which range list applies to the function it will be asked for,
@@ -999,6 +1005,219 @@ function results = runSweepAll(cfg)
     fprintf("\nRun complete. %d states.\n", numel(plan));
     if strlength(log.Readings) > 0
         fprintf("Readings: %s\n", log.Readings);
+    end
+
+    % After the run, and off the measured columns only. Nothing here can
+    % reach back into what was swept.
+    stats = summariseCurve(results, cfg);
+    reportCurve(stats);
+    plotCurve(results, stats, figurePath(log));
+end
+
+%% =====================================================================
+%  Curve summary
+%  =====================================================================
+
+function path = figurePath(log)
+% The figure sits beside the CSV under the same stamped name, so the two
+% halves of one run cannot drift apart. No CSV means no path, and the
+% figure is drawn on screen only.
+
+    path = "";
+    if strlength(log.Readings) > 0
+        path = replace(log.Readings, ".csv", ".png");
+    end
+end
+
+function stats = summariseCurve(results, cfg)
+% The numbers a cell is judged by, off the measured columns and nothing
+% else.
+%
+% Magnitudes throughout. Which sign the current and the voltage carry
+% depends on which way the leads went on, and a curve that lands in the
+% fourth quadrant is a wiring choice rather than a different cell. Papers
+% plot the first quadrant. The CSV keeps the signs the meters reported.
+%
+% Isc and Voc are read from the two endpoint states rather than from the
+% extremes of the sweep, because that is what those states are for: SHORT
+% is the cell into a reed contact and OPEN is the cell into 470 kohm.
+% Neither is a true endpoint, and the second is the weaker: the 470 kohm
+% path draws a fixed current, so under weak light the OPEN state stops
+% being an open circuit. Falling back to the extreme of what was measured
+% keeps a partial run useful, and the flags say which happened.
+%
+% Efficiency is deliberately absent. It needs the incident optical power,
+% and the software neither sets the illumination nor knows it.
+
+    v  = abs(results.VoltageV);
+    i  = abs(results.CurrentA);
+    p  = v .* i;
+    ok = ~isnan(v) & ~isnan(i);
+
+    stats = struct('Isc', NaN, 'Voc', NaN, 'Pmax', NaN, 'Vmp', NaN, ...
+                   'Imp', NaN, 'FillFactor', NaN, ...
+                   'AreaCm2', cfg.Cell.AreaCm2, ...
+                   'Points', sum(ok), 'Missing', sum(~ok), ...
+                   'IscFromEndpoint', false, 'VocFromEndpoint', false);
+
+    if ~any(ok)
+        return
+    end
+
+    short = find(results.Mode == "SHORT" & ok, 1);
+    if isempty(short)
+        stats.Isc = max(i(ok));
+    else
+        stats.Isc = i(short);
+        stats.IscFromEndpoint = true;
+    end
+
+    open = find(results.Mode == "OPEN" & ok, 1);
+    if isempty(open)
+        stats.Voc = max(v(ok));
+    else
+        stats.Voc = v(open);
+        stats.VocFromEndpoint = true;
+    end
+
+    p(~ok) = NaN;
+    [stats.Pmax, at] = max(p);
+    stats.Vmp = v(at);
+    stats.Imp = i(at);
+
+    if stats.Voc > 0 && stats.Isc > 0
+        stats.FillFactor = stats.Pmax / (stats.Voc * stats.Isc);
+    end
+end
+
+function reportCurve(stats)
+% The console gets what the figure carries, in the order a paper lists it.
+
+    if stats.Points == 0
+        fprintf("No state returned a reading, so there is no curve.\n");
+        return
+    end
+
+    guessed = "   (no SHORT state, largest measured)";
+
+    % Console and figure carry the same numbers in the same units, so an
+    % area given for one cannot leave the other reporting the other thing.
+    if stats.AreaCm2 > 0
+        scale = 1e3 / stats.AreaCm2;
+        fprintf("\nJsc  %8.3f mA/cm2%s\n", scale * stats.Isc, ...
+            ternary(stats.IscFromEndpoint, "", guessed));
+    else
+        scale = 1e3;
+        fprintf("\nIsc  %8.3f mA%s\n", scale * stats.Isc, ...
+            ternary(stats.IscFromEndpoint, "", guessed));
+    end
+
+    fprintf("Voc  %8.3f V%s\n", stats.Voc, ...
+        ternary(stats.VocFromEndpoint, "", ...
+                "   (no OPEN state, largest measured)"));
+    fprintf("FF   %8.3f\n", stats.FillFactor);
+    fprintf("Pmax %8.3f %s   at Vmp %.3f V, Imp %.3f %s\n", ...
+        scale * stats.Pmax, ternary(stats.AreaCm2 > 0, "mW/cm2", "mW"), ...
+        stats.Vmp, scale * stats.Imp, ...
+        ternary(stats.AreaCm2 > 0, "mA/cm2", "mA"));
+
+    if stats.Missing > 0
+        fprintf("%d state(s) returned no reading and are gaps in both.\n", ...
+            stats.Missing);
+    end
+end
+
+function plotCurve(results, stats, path)
+% Laid out the way a cell measurement is published: first quadrant, one
+% panel, voltage across, current up the left axis and power up the right,
+% the maximum power point marked on both and the four numbers in a box.
+%
+% Current density where CELL_AREA_CM2 gives the area and absolute current
+% where it does not. A paper reports mA/cm2; a bench with an
+% uncharacterised receiver has no area to divide by, and inventing one
+% would be worse than labelling the axis honestly.
+%
+% Sorted by voltage before the line is drawn. The sweep is ordered by the
+% resistance model, and that model is allowed to be wrong about the order,
+% so joining points in sweep order could draw a line the measurement does
+% not support. Markers stay on so the sampling is visible: the ladder is
+% uniform in resistance, which crowds the points hard toward Voc.
+
+    if stats.Points == 0
+        return
+    end
+
+    scale = 1e3;
+    unitI = "mA";
+    unitP = "mW";
+    label = "Current (mA)";
+    if stats.AreaCm2 > 0
+        scale = 1e3 / stats.AreaCm2;
+        unitI = "mA/cm^2";
+        unitP = "mW/cm^2";
+        label = "Current density (mA/cm^2)";
+    end
+
+    v = abs(results.VoltageV);
+    i = scale * abs(results.CurrentA);
+    p = scale * abs(results.VoltageV .* results.CurrentA);
+
+    [v, order] = sort(v);
+    i = i(order);
+    p = p(order);
+
+    fig = figure("Name", "PVLoad I-V curve", "Color", "w", ...
+        "Units", "centimeters", "Position", [2 2 16 11]);
+    ax = axes(fig);
+    hold(ax, "on");
+
+    yyaxis(ax, "left");
+    plot(ax, v, i, "-o", "MarkerSize", 3, "LineWidth", 1.1, ...
+        "DisplayName", "I-V");
+    plot(ax, stats.Vmp, scale * stats.Imp, "s", "MarkerSize", 10, ...
+        "LineWidth", 1.4, "MarkerFaceColor", "w", ...
+        "DisplayName", "maximum power");
+    ylabel(ax, label);
+    ylim(ax, [0 1.1 * scale * stats.Isc]);
+
+    yyaxis(ax, "right");
+    plot(ax, v, p, "--", "LineWidth", 1.0, "DisplayName", "P-V");
+    ylabel(ax, "Power (" + unitP + ")");
+    ylim(ax, [0 1.4 * scale * stats.Pmax]);
+
+    yyaxis(ax, "left");
+    hold(ax, "off");
+    box(ax, "on");
+    ax.TickDir = "in";
+    ax.LineWidth = 0.8;
+    ax.FontSize = 10;
+    xlabel(ax, "Voltage (V)");
+    xlim(ax, [0 1.05 * stats.Voc]);
+    legend(ax, "Location", "southwest", "Box", "off");
+
+    if stats.AreaCm2 > 0
+        first = sprintf("J_{sc} = %.3f %s", scale * stats.Isc, unitI);
+    else
+        first = sprintf("I_{sc} = %.3f mA", 1e3 * stats.Isc);
+    end
+
+    % Placed in data coordinates rather than on the figure, so it lands in
+    % the same empty region whatever the cell turns out to do. That region
+    % is the left of the plot below the plateau: the I-V runs flat along
+    % the top until the knee, the P-V climbs from the origin and is still
+    % low there, and the legend sits under it in the corner.
+    text(ax, 0.04 * stats.Voc, 0.74 * 1.1 * scale * stats.Isc, ...
+        {first, ...
+         sprintf("V_{oc} = %.3f V", stats.Voc), ...
+         sprintf("FF = %.3f", stats.FillFactor), ...
+         sprintf("P_{max} = %.3f %s", scale * stats.Pmax, unitP)}, ...
+        "VerticalAlignment", "top", "FontSize", 10, ...
+        "BackgroundColor", "w", "Margin", 6, ...
+        "EdgeColor", [0.15 0.15 0.15]);
+
+    if strlength(path) > 0
+        exportgraphics(fig, path, "Resolution", 300);
+        fprintf("Plot:     %s\n", path);
     end
 end
 
