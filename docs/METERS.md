@@ -11,12 +11,21 @@ A Keithley 196 and an Agilent 34401A. `DMM_V_MODEL`, `DMM_I_MODEL` and
 `DMM_R_MODEL` pick the profile per meter and need not match; the bench runs the
 34401A on volts and the 196 on amps.
 
-A meter is an open port bundled with its profile, built by `meterSpec` and
+A meter is an open port bundled with its profile, built by `Profiles.spec` and
 opened by `openMeter`. Every bus function takes that bundle, so nothing below
 the configuration block knows which instrument it is holding. Each profile
 carries a `Dialect`, and the functions that touch the bus branch on it:
 `openMeter`, `identifyMeter`, `configureMeter`, `meterTrigger`, `meterFetch`,
 `meterDecode`, and the setup check.
+
+`matlab/+pvload/Meter.m` and `Profiles.m` are a library: they call nothing else
+in the package. The caller picks a range and passes it in, `Meter.readPoint`
+takes the one flag it uses rather than the whole configuration, and the range
+state a run follows is set through `Meter.setRanges` rather than reached into
+from outside. Everything else may call into the meters; the meters never call
+out. Public surface: `connect`, `openPort`, `identify`, `configure`,
+`readPoint`, `readOnce`, `setRanges`, `reportRangeChanges`, `closeBoth`,
+`closeOne`, `checkRange`, `checkNplc`.
 
 There is no Keithley 617 in this project. An earlier version supported one and
 none of it survives.
@@ -145,5 +154,5 @@ The voltmeter follows for resolution: a 34401A carries 0.0035% of reading plus
 0.35 µV of gain error. The ammeter follows for survival: a pinned range cannot
 track illumination that drifts, and five overflows in a row abort the run.
 
-`assertConfig` warns when `ISC_FULL` sits far below the ammeter's lowest range
+`Config.check` warns when `ISC_FULL` sits far below the ammeter's lowest range
 and refuses when it sits above the highest.

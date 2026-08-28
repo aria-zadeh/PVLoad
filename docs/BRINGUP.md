@@ -262,7 +262,7 @@ More light is the whole fix; the board cannot make a load between 10.3 kΩ and
 illumination of this run.
 
 `ISC_FULL` is now 100 µA, which also moves the 196 off its 30 mA range, where
-the cell was living in the bottom 0.2 %, onto 300 µA. `summariseCurve` decides
+the cell was living in the bottom 0.2 %, onto 300 µA. `Curve.summarise` decides
 both of the above from the measurement and says so, and the figure no longer
 draws a line from the top of the ladder to the `OPEN` point across the region
 nothing was measured in.

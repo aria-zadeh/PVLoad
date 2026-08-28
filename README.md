@@ -99,7 +99,21 @@ hardware/
   gerbers/         Gerber X2 and NC drill files
   bom.pdf          Bill of materials
 matlab/
-  PVLoad_Main.m    Sweep controller and meter drivers
+  PVLoad_Main.m    Settings an operator edits, then the dispatch
+  +pvload/         The code, one class per subsystem
+    Meter.m        Both DMM dialects: open, configure, trigger, fetch, decode
+    Profiles.m     What each instrument speaks
+    Hardware.m     Pin map, resistance model, settle constants
+    Board.m        Arduino, relays, digipots
+    Plan.m         Which load states exist and in what order
+    Ranging.m      Sizing the meters from the cell before a run
+    Timing.m       Settle model and point budget
+    Sweep.m        The fixed and adaptive run loops, the Ctrl-C guard
+    Curve.m        Isc, Voc, FF, Pmax and the I-V figure
+    Output.m       CSV writing, file naming, the ohms figure
+    Modes.m        The nine RUN modes
+    Config.m       Configuration validation
+    Util.m         Two helpers with no home of their own
   test_arduino.m   Pin-by-pin bench test of the Arduino alone
 data/
   sweep_data/      CSV output
@@ -127,9 +141,9 @@ find any VISA resources`.
 
 `DMM_V_MODEL`, `DMM_I_MODEL`, and `DMM_R_MODEL` select the instrument for each meter, from `"196"`
 and `"34401A"`. The model is named per meter rather than once for the bench, so the voltmeter and
-the ammeter can be different instruments, and here they are. One profile per model at the top of
-Part 2 holds what differs: which command selects which function, what ranges exist, and how a
-reading is decoded. Each meter carries its own profile from the moment it is opened.
+the ammeter can be different instruments, and here they are. One profile per model in
+`+pvload/Profiles.m` holds what differs: which command selects which function, what ranges exist,
+and how a reading is decoded. Each meter carries its own profile from the moment it is opened.
 
 The two speak different languages. On the 196 a command is a letter and a number, several travel in
 one string, and nothing takes effect until an `X` arrives. The 34401A is SCPI, so its commands are
@@ -207,8 +221,10 @@ with the board disconnected.
 
 ## Configuration
 
-`PVLoad_Main.m` is split into two parts. Part 1 holds the settings intended to be changed. Part 2
-describes the pin map and the meter command sets, and changes only with the hardware.
+`PVLoad_Main.m` holds Part 1, the settings intended to be changed, and then assembles them and
+dispatches. The pin map, the resistance model and the settle constants are in
+`+pvload/Hardware.m`, and the meter command sets are in `+pvload/Profiles.m`; both change only
+with the hardware.
 
 | Setting | Description |
 |---|---|
@@ -338,7 +354,7 @@ refused at configuration time; one far below its lowest range is a warning, not 
 than at 0 V. Voltage is measured at every point, so `SHORT` is the lowest-voltage point on the curve
 rather than a point defined to be at zero. Isc is obtained by extrapolating to V = 0.
 
-Instrument commands are collected in one profile per model in Part 2, selected per meter by
+Instrument commands are collected in one profile per model in `+pvload/Profiles.m`, selected per meter by
 `DMM_V_MODEL`, `DMM_I_MODEL`, and `DMM_R_MODEL`. Two dialects are supported: Keithley's own
 device-dependent command language, which does not port beyond that family, and SCPI.
 
