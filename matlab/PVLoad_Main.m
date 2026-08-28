@@ -2422,6 +2422,78 @@ function cfg = measureSettle(board, meas, cfg, plan)
     end
 end
 
+function reportKnee(plan, voc, isc)
+% Says whether the knee is inside the ladder before the sweep spends
+% minutes finding out.
+%
+% The load sets the operating point: the cell sits where its curve crosses
+% a line of slope 1/R, so the resistance that lands on the maximum power
+% point is Vmp over Imp. Taking the usual 0.8 of Voc and 0.9 of Isc is
+% rough, and rough is enough for the only question here, which is whether
+% that resistance is inside the range of a board whose ladder spans two
+% decades.
+%
+% This prints and warns and does nothing else. It cannot skip a state or
+% choose one, which is the same rule the resistance model has always run
+% under: R_AB is plus or minus 20%, the wiper is measured on one board,
+% and neither is allowed to decide what gets measured. It is allowed to
+% decide what the operator is told before the run.
+
+    ladder = [plan.Mode] ~= "SHORT" & [plan.Mode] ~= "OPEN";
+    lo     = min([plan(ladder).Resistance]);
+    hi     = max([plan(ladder).Resistance]);
+    rMpp   = (0.8 * voc) / (0.9 * isc);
+
+    fprintf("  knee near %.0f ohm; the ladder covers %.0f to %.0f.\n", ...
+        rMpp, lo, hi);
+
+    if rMpp > hi
+        warning("PVLoad:KneeAboveLadder", ...
+            "The maximum power point of this cell wants about %.0f ohm " + ...
+            "and the ladder stops at %.0f. The sweep will measure the " + ...
+            "current-source plateau and stop short of the knee, and Pmax " + ...
+            "will be a lower bound. About %.0f uA of short-circuit " + ...
+            "current would bring the knee to the top of the ladder, " + ...
+            "which is %.1fx this illumination.", ...
+            rMpp, hi, 1e6 * (0.8 * voc) / (0.9 * hi), rMpp / hi);
+    elseif rMpp < lo
+        warning("PVLoad:KneeBelowLadder", ...
+            "The maximum power point of this cell wants about %.0f ohm " + ...
+            "and the ladder starts at %.0f, which is the wiper " + ...
+            "resistance. Only the SHORT state sits below the knee, so the " + ...
+            "sweep will start past it. Less light would bring it back.", ...
+            rMpp, lo);
+    end
+end
+
+function state = probeState(mode)
+% The settle a state of this mode gets, without going through the plan.
+    state = struct('Mode', string(mode), 'Code1', 0, 'Code2', 0, ...
+                   'Resistance', 0);
+end
+
+function value = probeRead(m, role, mode)
+% One reading, and it has to arrive. A probe that quietly returned NaN
+% would size the range from nothing and the whole run would inherit it.
+
+    try
+        value = meterReadOnce(m);
+    catch readError
+        error("PVLoad:ProbeFailed", ...
+            "The %s meter (%s) could not be read at the %s state while " + ...
+            "sizing its range: %s", role, m.Label, mode, readError.message);
+    end
+
+    value = abs(value);
+
+    if isnan(value) || value <= 0
+        error("PVLoad:ProbeFailed", ...
+            "The %s meter (%s) returned %g at the %s state while sizing " + ...
+            "its range. On autorange that is an open lead, a dark cell, " + ...
+            "or a meter on the wrong function.", role, m.Label, value, mode);
+    end
+end
+
 function [volts, amps, fault, meas] = readPoint(meas, cfg)
 % Both meters are triggered before either reply is collected, so the two
 % conversions overlap. Each dialect gets there its own way, and with two
