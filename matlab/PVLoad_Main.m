@@ -118,7 +118,7 @@ WIPER_CODES = [0 255];
 
 WRITE_CSV = true;
 OUT_DIR   = "../data/sweep_data";
-RUN_TAG   = "ILASER0p600";            % added to the file names. this is where the
+RUN_TAG   = "ILASER0p700";            % added to the file names. this is where the
                            % illumination goes, since nothing else records
                            % it. e.g. "cell3_lamp60"
 
@@ -2705,10 +2705,36 @@ function [volts, amps, fault, meas] = readPoint(meas, cfg)
             volts, meas.VChanges);
     end
 
+    iChangesBefore = meas.IChanges;
     if meas.IAdaptive
         [amps, meas.IRangeNow, meas.IChanges] = followRange( ...
             meas.I, "current", meas.IRanges, meas.IRangeNow, ...
             amps, meas.IChanges);
+    end
+
+    % An ammeter that changed range inside this point was on the wrong
+    % range while the voltmeter converted, and an overloaded 196 clamps
+    % over a volt of burden across its terminals, which sits in series
+    % with the cell and lands in the voltage reading. The recovered
+    % current is then real and the voltage is not, and their product is a
+    % power the cell never made: every run's first state after OPEN read
+    % about 1.5 V high this way, and at 0.7 A of laser drive the fake
+    % point outbid the true maximum. The pair is taken again now that
+    % both meters sit on ranges that fit.
+    if meas.IChanges > iChangesBefore && ~isnan(amps)
+        try
+            if cfg.Dmm.Parallel
+                meterTrigger(meas.V);
+                meterTrigger(meas.I);
+                volts = meterFetch(meas.V);
+                amps  = meterFetch(meas.I);
+            else
+                volts = meterReadOnce(meas.V);
+                amps  = meterReadOnce(meas.I);
+            end
+        catch
+            fault = true;
+        end
     end
 
     fault = fault || isnan(volts) || isnan(amps);
