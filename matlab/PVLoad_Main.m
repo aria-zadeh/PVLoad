@@ -69,8 +69,19 @@ DMM_R_ADDRESS = "GPIB0::1::INSTR";  % the one meter RUN "ohms" uses, on
 % run the sweep, change the lamp, run it again; each run writes its own
 % timestamped CSV and RUN_TAG is how you tell them apart afterwards.
 
-ISC_FULL = 0.016;          % A, short-circuit current under that light
-VOC_FULL = 9;              % V, open-circuit voltage under that light
+ISC_FULL = 100e-6;         % A, short-circuit current under that light.
+                           % measured 64.8 uA at 0.42 A of laser drive,
+                           % run 20260828_145929. this is that with room
+                           % to climb, and it puts the 196 on its 300 uA
+                           % range instead of the 30 mA one, where the
+                           % cell was living in the bottom 0.2%.
+VOC_FULL = 4;              % V, open-circuit voltage under that light. the
+                           % OPEN state read 3.384 V on the same run and
+                           % that is a floor rather than Voc, since 470
+                           % kohm was still drawing 11% of Isc. anything
+                           % from 1 to 10 selects the same 10 V range on
+                           % the 34401A, so the exact figure is not
+                           % load bearing.
 
 CELL_AREA_CM2 = 0;         % cm2 of illuminated cell, or 0 if not known.
                            % decides whether the figure carries current or
@@ -111,7 +122,7 @@ WIPER_CODES = [0 255];
 
 WRITE_CSV = true;
 OUT_DIR   = "../data/sweep_data";
-RUN_TAG   = "";            % added to the file names. this is where the
+RUN_TAG   = "ILASER0p42  ";            % added to the file names. this is where the
                            % illumination goes, since nothing else records
                            % it. e.g. "cell3_lamp60"
 
@@ -1065,7 +1076,9 @@ function stats = summariseCurve(results, cfg)
                    'Imp', NaN, 'FillFactor', NaN, ...
                    'AreaCm2', cfg.Cell.AreaCm2, ...
                    'Points', sum(ok), 'Missing', sum(~ok), ...
-                   'IscFromEndpoint', false, 'VocFromEndpoint', false);
+                   'IscFromEndpoint', false, 'VocFromEndpoint', false, ...
+                   'OpenFraction', NaN, 'VocIsFloor', false, ...
+                   'PmaxAtEdge', false);
 
     if ~any(ok)
         return
@@ -1094,6 +1107,31 @@ function stats = summariseCurve(results, cfg)
 
     if stats.Voc > 0 && stats.Isc > 0
         stats.FillFactor = stats.Pmax / (stats.Voc * stats.Isc);
+    end
+
+    % Whether the two things the numbers above assume are actually true,
+    % decided from the measurement rather than from the cell model.
+    %
+    % The OPEN state is 470 kohm, not an open circuit. That path draws a
+    % current set by Voc alone while Isc scales with the light, so under
+    % weak illumination it stops being negligible and the voltage there is
+    % a floor under Voc rather than Voc. Fill factor inherits the error.
+    %
+    % The ladder stops at 10.3 kohm. A cell whose knee needs more than
+    % that never leaves its current-source region, and the largest power
+    % in the sweep is then the last point of the ladder rather than a
+    % maximum. Reporting that as Pmax without saying so would be the
+    % worst of the three, because it looks like an answer.
+
+    if ~isempty(open) && stats.Isc > 0
+        stats.OpenFraction = i(open) / stats.Isc;
+        stats.VocIsFloor   = stats.OpenFraction > 0.05;
+    end
+
+    ladder = ok & results.Mode ~= "OPEN" & results.Mode ~= "SHORT";
+    if any(ladder)
+        [~, edge] = max(v .* ladder);
+        stats.PmaxAtEdge = at == edge;
     end
 end
 
@@ -1127,6 +1165,20 @@ function reportCurve(stats)
         scale * stats.Pmax, ternary(stats.AreaCm2 > 0, "mW/cm2", "mW"), ...
         stats.Vmp, scale * stats.Imp, ...
         ternary(stats.AreaCm2 > 0, "mA/cm2", "mA"));
+
+    if stats.VocIsFloor
+        fprintf("\nThe OPEN state still drew %.1f%% of Isc through the " + ...
+            "470 kohm path,\nso Voc is a floor and FF is smaller than " + ...
+            "the cell's. More light\nis the fix; nothing in software " + ...
+            "reaches it.\n", 100 * stats.OpenFraction);
+    end
+
+    if stats.PmaxAtEdge
+        fprintf("\nThe largest power in the sweep is the last state of " + ...
+            "the ladder, so the\nknee is above 10.3 kohm and outside " + ...
+            "what the board can make. Pmax\nis a lower bound, not a " + ...
+            "maximum.\n");
+    end
 
     if stats.Missing > 0
         fprintf("%d state(s) returned no reading and are gaps in both.\n", ...
@@ -1169,9 +1221,20 @@ function plotCurve(results, stats, path)
     i = scale * abs(results.CurrentA);
     p = scale * abs(results.VoltageV .* results.CurrentA);
 
-    [v, order] = sort(v);
-    i = i(order);
-    p = p(order);
+    % The three circuit configurations are drawn apart. SHORT is the cell
+    % into a reed contact and OPEN is the cell into 470 kohm; between the
+    % top of the ladder and that 470 kohm the board has no states at all,
+    % so a line joining them would draw a straight run of curve through a
+    % region nothing was measured in. On a cell whose knee falls in that
+    % gap, which is any cell too dim for the ladder to load, that line is
+    % the most confident-looking part of the figure and the only part with
+    % no data under it. The ladder gets the line; the endpoints get
+    % markers of their own.
+
+    ladder = results.Mode ~= "SHORT" & results.Mode ~= "OPEN";
+    [vl, order] = sort(v(ladder));
+    il = i(ladder); il = il(order);
+    pl = p(ladder); pl = pl(order);
 
     fig = figure("Name", "PVLoad I-V curve", "Color", "w", ...
         "Units", "centimeters", "Position", [2 2 16 11]);
@@ -1179,16 +1242,32 @@ function plotCurve(results, stats, path)
     hold(ax, "on");
 
     yyaxis(ax, "left");
-    plot(ax, v, i, "-o", "MarkerSize", 3, "LineWidth", 1.1, ...
-        "DisplayName", "I-V");
+    plot(ax, vl, il, "-o", "MarkerSize", 3, "LineWidth", 1.1, ...
+        "DisplayName", "load ladder");
+
+    at = results.Mode == "SHORT";
+    if any(at)
+        plot(ax, v(at), i(at), "d", "MarkerSize", 8, "LineWidth", 1.2, ...
+            "MarkerFaceColor", "w", "DisplayName", "SHORT");
+    end
+
+    at = results.Mode == "OPEN";
+    if any(at)
+        plot(ax, v(at), i(at), "^", "MarkerSize", 8, "LineWidth", 1.2, ...
+            "MarkerFaceColor", "w", ...
+            "DisplayName", ternary(stats.VocIsFloor, ...
+                "OPEN (470 kohm, loaded)", "OPEN"));
+    end
+
     plot(ax, stats.Vmp, scale * stats.Imp, "s", "MarkerSize", 10, ...
         "LineWidth", 1.4, "MarkerFaceColor", "w", ...
-        "DisplayName", "maximum power");
+        "DisplayName", ternary(stats.PmaxAtEdge, ...
+            "largest power (edge of sweep)", "maximum power"));
     ylabel(ax, label);
     ylim(ax, [0 1.1 * scale * stats.Isc]);
 
     yyaxis(ax, "right");
-    plot(ax, v, p, "--", "LineWidth", 1.0, "DisplayName", "P-V");
+    plot(ax, vl, pl, "--", "LineWidth", 1.0, "DisplayName", "P-V");
     ylabel(ax, "Power (" + unitP + ")");
     ylim(ax, [0 1.4 * scale * stats.Pmax]);
 
@@ -1215,7 +1294,8 @@ function plotCurve(results, stats, path)
     % low there, and the legend sits under it in the corner.
     text(ax, 0.04 * stats.Voc, 0.74 * 1.1 * scale * stats.Isc, ...
         {first, ...
-         sprintf("V_{oc} = %.3f V", stats.Voc), ...
+         sprintf(ternary(stats.VocIsFloor, ...
+             "V_{oc} > %.3f V", "V_{oc} = %.3f V"), stats.Voc), ...
          sprintf("FF = %.3f", stats.FillFactor), ...
          sprintf("P_{max} = %.3f %s", scale * stats.Pmax, unitP)}, ...
         "VerticalAlignment", "top", "FontSize", 10, ...
@@ -2535,7 +2615,7 @@ function log = openLog(cfg, nStates)
     end
 
     stamp = string(datetime("now", "Format", "yyyyMMdd_HHmmss"));
-    tag   = cfg.Out.Tag;
+    tag   = strtrim(cfg.Out.Tag);
     if strlength(tag) > 0
         tag = "_" + tag;
     end

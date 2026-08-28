@@ -201,6 +201,35 @@ from table 3-8, the 24 ms conversion from table 3-16, the reading tags from
 figure 3-6. Inference had the lowest amps range at 3 mA where it is 300 uA, and
 the conversion at 350 ms where it is 24 ms.
 
+**The first sweep on a cell ran clean and the cell is far dimmer than the board
+was sized for.** Run `20260828_145929`, tagged `ILASER0p42`, 0.42 A of laser
+drive: 769 of 769 states, no dropped readings, current drift −0.011 %/min over
+10.6 minutes. The instrument chain is finished. What it measured:
+
+| | measured | the board wants |
+|---|---|---|
+| Isc | 64.8 µA | ~1 mA and up |
+| V at the top of the ladder | 0.683 V | most of Voc |
+| OPEN state current | 7.07 µA, 10.9 % of Isc | under 5 % |
+
+Three consequences, none of them software faults. The ladder stops at 10.3 kΩ
+and this cell needs about 36.5 kΩ to reach 70 % of Voc, so the sweep never
+leaves the current-source plateau and the knee falls in the gap between the top
+of the ladder and R1. The `OPEN` state is not open at this light: 470 kΩ draws
+11 % of Isc, so its 3.384 V is a floor under Voc rather than Voc. Fill factor
+inherits both errors and means nothing on this run.
+
+More light is the whole fix; the board cannot make a load between 10.3 kΩ and
+470 kΩ. Isc of roughly 270 µA puts the knee at the very top of the ladder and
+1–2 mA puts it where the sampling is dense, which is 4× to 30× the
+illumination of this run.
+
+`ISC_FULL` is now 100 µA, which also moves the 196 off its 30 mA range, where
+the cell was living in the bottom 0.2 %, onto 300 µA. `summariseCurve` decides
+both of the above from the measurement and says so, and the figure no longer
+draws a line from the top of the ladder to the `OPEN` point across the region
+nothing was measured in.
+
 **The input-only flush and the `DCI` tag passed on the bench.** Repeated
 `RUN = "meters"` with both instruments attached and nothing connected to their
 inputs: both identify, both configure, and ten readings sit at noise, volts
