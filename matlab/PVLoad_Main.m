@@ -1008,7 +1008,7 @@ function results = runSweepAll(cfg)
     % energised behind nothing.
     try
         meas = connectMeters(cfg);
-        probeRanges(board, meas, cfg);
+        probeRanges(board, meas, cfg, plan);
         log  = openLog(cfg, numel(plan));
     catch openError
         quietly(@() enterSafeState(board));
@@ -2219,7 +2219,7 @@ function range = pickVoltageRange(cfg, vocSeen)
     end
 end
 
-function probeRanges(board, meas, cfg)
+function probeRanges(board, meas, cfg, plan)
 % Measures the two numbers the meters have to be sized from, instead of
 % being told them.
 %
@@ -2297,6 +2297,52 @@ function probeRanges(board, meas, cfg)
             "The 470 kohm path draws %.1f%% of the short-circuit current " + ...
             "at this illumination, so the OPEN state is a floor under Voc " + ...
             "rather than Voc.", 100 * fraction);
+    end
+
+    reportKnee(plan, voc, isc);
+end
+
+function reportKnee(plan, voc, isc)
+% Says whether the knee is inside the ladder before the sweep spends
+% minutes finding out.
+%
+% The load sets the operating point: the cell sits where its curve crosses
+% a line of slope 1/R, so the resistance that lands on the maximum power
+% point is Vmp over Imp. Taking the usual 0.8 of Voc and 0.9 of Isc is
+% rough, and rough is enough for the only question here, which is whether
+% that resistance is inside the range of a board whose ladder spans two
+% decades.
+%
+% This prints and warns and does nothing else. It cannot skip a state or
+% choose one, which is the same rule the resistance model has always run
+% under: R_AB is plus or minus 20%, the wiper is measured on one board,
+% and neither is allowed to decide what gets measured. It is allowed to
+% decide what the operator is told before the run.
+
+    ladder = [plan.Mode] ~= "SHORT" & [plan.Mode] ~= "OPEN";
+    lo     = min([plan(ladder).Resistance]);
+    hi     = max([plan(ladder).Resistance]);
+    rMpp   = (0.8 * voc) / (0.9 * isc);
+
+    fprintf("  knee near %.0f ohm; the ladder covers %.0f to %.0f.\n", ...
+        rMpp, lo, hi);
+
+    if rMpp > hi
+        warning("PVLoad:KneeAboveLadder", ...
+            "The maximum power point of this cell wants about %.0f ohm " + ...
+            "and the ladder stops at %.0f. The sweep will measure the " + ...
+            "current-source plateau and stop short of the knee, and Pmax " + ...
+            "will be a lower bound. About %.0f uA of short-circuit " + ...
+            "current would bring the knee to the top of the ladder, " + ...
+            "which is %.1fx this illumination.", ...
+            rMpp, hi, 1e6 * (0.8 * voc) / (0.9 * hi), rMpp / hi);
+    elseif rMpp < lo
+        warning("PVLoad:KneeBelowLadder", ...
+            "The maximum power point of this cell wants about %.0f ohm " + ...
+            "and the ladder starts at %.0f, which is the wiper " + ...
+            "resistance. Only the SHORT state sits below the knee, so the " + ...
+            "sweep will start past it. Less light would bring it back.", ...
+            rMpp, lo);
     end
 end
 
