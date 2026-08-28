@@ -144,8 +144,10 @@ PIN_K1_DRIVE = "D6";       % K1, 470 kohm bypass relay. HIGH bypasses it.
 PIN_K2_DRIVE = "D7";       % K2, whole-load short relay. HIGH shorts the cell.
 PIN_K3_DRIVE = "D8";       % K3, DigiPot 2 bypass relay. HIGH bypasses U2.
 
-CODE_STEP     = 1;         % 1 visits all 769 states. raising it thins the
-                           % sweep and breaks that count.
+CODE_STEP     = 16;        % 1 visits all 769 states, 16 visits 50, and the
+                           % count is 767/step + 2. thins by wiper code,
+                           % never by resistance, so which points survive
+                           % does not depend on the resistance model.
 INCLUDE_SHORT = true;      % the Isc endpoint (K2 closed)
 INCLUDE_OPEN  = true;      % the Voc endpoint (470 kohm in circuit)
 VERIFY_WIPER  = true;      % read each wiper register back after writing
@@ -363,6 +365,17 @@ RELAY_SETTLE  = 0.010;     % s after a relay changes. HARDWARE.md s6;
 WIPER_SETTLE  = 0.001;     % s after a wiper-only change. the pot settles
                            % in ~1 us; this is the SPI round trip.
 SETTLE_SAFETY = 1.5;       % covers USB jitter and pause() granularity
+POINT_BUDGET  = 1.0;       % s, the most one state may cost end to end.
+                           % the hold is whatever is left after the
+                           % conversion and the board, so this is the
+                           % number the run is actually built to, not an
+                           % estimate of one. 50 states at a second is a
+                           % minute.
+BOARD_OVERHEAD = 0.08;     % s of USB round trips per state: three relay
+                           % writes, two wiper writes, and two readbacks
+                           % when VERIFY_WIPER is on. measured off the
+                           % clock rather than the datasheet, and the term
+                           % that made the last estimate too low.
 RC_TAU_COUNT  = 7;         % time constants. e^-7 is 0.09%.
 C_LOAD        = 300e-12;   % F, dominated by the leads and the meter
                            % input.
@@ -451,6 +464,8 @@ cfg.Timing = struct( ...
     'TauCount',    RC_TAU_COUNT, ...
     'CLoad',       C_LOAD, ...
     'CellSettle',  CELL_SETTLE, ...
+    'Budget',      POINT_BUDGET, ...
+    'Overhead',    BOARD_OVERHEAD, ...
     'Measure',     MEASURE_SETTLE);
 
 cfg.Out = struct( ...
@@ -1552,15 +1567,7 @@ function t = estimatePointTime(cfg, plan)
     t = mean(holds);
 
     if cfg.Dmm.Enabled
-        % Overlapped, the pair costs the slower of the two; one at a time it
-        % costs both. Two different instruments make that a real difference
-        % rather than a doubling.
-        if cfg.Dmm.Parallel
-            reading = max(cfg.Dmm.V.Conversion, cfg.Dmm.I.Conversion);
-        else
-            reading = cfg.Dmm.V.Conversion + cfg.Dmm.I.Conversion;
-        end
-        t = t + reading + 0.02;
+        t = t + conversionTime(cfg) + cfg.Timing.Overhead;
     end
 end
 
@@ -2890,6 +2897,45 @@ function settle = settleFor(state, prevMode, cfg)
     settle = max(T.RelaySettle, ...
         T.Safety * (tSwitch + T.TauCount * state.Resistance * T.CLoad + ...
                     T.CellSettle));
+
+    % Capped by what is left of the point's budget once the conversion and
+    % the board have taken their share, so the ceiling is on the state and
+    % not merely on the pause inside it. The run time is a decision; the
+    % settle formula is an estimate, and a measured capacitance asking for
+    % seconds per state is exactly the case where waiting costs most, since
+    % the longer the sweep the further anything drifting has moved by the
+    % end of it.
+    settle = min(settle, settleCap(cfg));
+end
+
+function cap = settleCap(cfg)
+% What the hold may be if the state is to fit the budget. Never below the
+% relay settle, which is a hardware minimum rather than a preference.
+%
+% This shortens the waiting and nothing else. The conversion that follows
+% runs to completion, the reading is collected, and a point that overruns
+% because a meter changed range or an overflow had to be read again still
+% finishes and still lands in the CSV. No state is skipped and no reading
+% is cut short to make the time; the budget decides how long the sweep
+% pauses, not whether it measures.
+
+    T = cfg.Timing;
+    cap = T.Budget - T.Overhead - conversionTime(cfg);
+    cap = max(T.RelaySettle, cap);
+end
+
+function reading = conversionTime(cfg)
+% Overlapped, the pair costs the slower of the two; one at a time it costs
+% both. Two different instruments make that a real difference rather than
+% a doubling.
+
+    if ~cfg.Dmm.Enabled
+        reading = 0;
+    elseif cfg.Dmm.Parallel
+        reading = max(cfg.Dmm.V.Conversion, cfg.Dmm.I.Conversion);
+    else
+        reading = cfg.Dmm.V.Conversion + cfg.Dmm.I.Conversion;
+    end
 end
 
 
@@ -2931,6 +2977,7 @@ function results = runSweep(board, meas, plan, cfg, log)
     run     = 0;               % consecutive faults
     faults  = 0;
     written = 0;               % states already on disk
+    started = tic;             % what the point actually costs, not the estimate
 
     for k = 1:total
         settle = settleFor(plan(k), prev, cfg);
@@ -2968,6 +3015,9 @@ function results = runSweep(board, meas, plan, cfg, log)
     end
 
     fprintf("\n%d read fault(s).\n", faults);
+    fprintf("%.0f ms per state in the end, against the %.0f ms " + ...
+        "estimated.\n", 1e3 * toc(started) / total, ...
+        1e3 * estimatePointTime(cfg, plan));
     if meas.VChanges > 0
         fprintf("The voltmeter changed range %d time(s), ending on %g V.\n", ...
             meas.VChanges, meas.VRangeNow);
