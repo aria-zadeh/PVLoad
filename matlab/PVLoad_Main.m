@@ -237,10 +237,10 @@ DDC_196 = struct( ...
     'AutoRange',  "R0", ...
     'Prefixes',   "DCV|ACV|OHM|OCO|DCI|ACI|dBV|dBI", ...
     'StatusMap',  struct('F', 3, 'K', 6, 'R', 18, 'S', 19, 'T', 20, 'Z', 27), ...
-    'Common',     "Z0B0G0M0K2S2T5", ...
+    'Common',     "Z0B0G0M0K2S3T5", ...
     'Machine',    "U0", ...
     'Error',      "U1", ...
-    'Conversion', 0.024, ...
+    'Conversion', 0.106, ...
     'VRanges',    [0.3 3 30 300], ...
     'IRanges',    [3e-4 3e-3 3e-2 3e-1 3], ...
     'RRanges',    [300 3e3 3e4 3e5 3e6 3e7 3e8]);
@@ -255,9 +255,12 @@ DDC_196 = struct( ...
 %   amps 300 uA to 3 A, ohms 300 ohm to 300 Mohm. Note that amps starts a
 %   decade below the 3 mA a 6.5 digit DMM is usually assumed to stop at.
 %
-%   Conversion is 24 ms, table 3-16, which is the trigger to reading-ready
-%   time at S2. The integration period itself is one line cycle; the rest
-%   is the bus. S3 would be 106 ms for one more digit.
+%   S3 is 6.5 digits and 106 ms, table 3-16, against S2's 5.5 and 24 ms.
+%   The extra digit is free: the readings are overlapped and the 34401A
+%   next to it takes 393 ms at 10 NPLC with autozero, so the 196 finishes
+%   inside that window either way and the point costs the same. On a cell
+%   sitting at a fifth of the 300 uA range that digit is the difference
+%   between 10 nA and 1 nA of resolution.
 %
 %   Prefixes are the reading mnemonics of figure 3-6. DC amps is DCI, not
 %   the DCA another Keithley uses, and a decoder that does not know that
@@ -361,14 +364,18 @@ SETTLE_SAFETY = 1.5;       % covers USB jitter and pause() granularity
 RC_TAU_COUNT  = 7;         % time constants. e^-7 is 0.09%.
 C_LOAD        = 300e-12;   % F, dominated by the leads and the meter
                            % input.
-CELL_SETTLE   = 0.100;     % s for the cell's own junction capacitance,
-                           % which the 300 pF above does not cover: that
-                           % figure is leads and meter input. Unmeasured on
-                           % this receiver, so this is a deliberate
-                           % over-estimate rather than a number off a
-                           % datasheet. It lands on every state, so it sets
-                           % the floor of the sweep; a run that shows no
-                           % hysteresis against a slower one can lower it.
+CELL_SETTLE   = 0.020;     % s of flat hold for the cell, on top of the
+                           % RC term. a floor under the measurement below
+                           % rather than a substitute for it.
+MEASURE_SETTLE = true;     % watch the cell settle at the slowest state
+                           % before the run and set its capacitance from
+                           % what that takes. the alternative is guessing
+                           % C_LOAD for a junction nobody has characterised,
+                           % and guessing low bends the curve: an
+                           % under-settled point reads a current that has
+                           % not finished falling, worst where R is
+                           % largest, which is a systematic tilt across the
+                           % sweep rather than noise.
 
 CSV_CHUNK     = 64;        % states written to disk at a time. writetable
                            % reopens the file per call, so a row at a time
@@ -441,7 +448,8 @@ cfg.Timing = struct( ...
     'Safety',      SETTLE_SAFETY, ...
     'TauCount',    RC_TAU_COUNT, ...
     'CLoad',       C_LOAD, ...
-    'CellSettle',  CELL_SETTLE);
+    'CellSettle',  CELL_SETTLE, ...
+    'Measure',     MEASURE_SETTLE);
 
 cfg.Out = struct( ...
     'WriteCsv', WRITE_CSV, ...
@@ -1008,7 +1016,8 @@ function results = runSweepAll(cfg)
     % energised behind nothing.
     try
         meas = connectMeters(cfg);
-        probeRanges(board, meas, cfg, plan);
+        [cfg, meas] = probeRanges(board, meas, cfg, plan);
+        meas = narrowVoltmeter(board, meas, cfg, plan);
         log  = openLog(cfg, numel(plan));
     catch openError
         quietly(@() enterSafeState(board));
@@ -1730,7 +1739,8 @@ function meas = connectMeters(cfg)
 % than a race against the last one.
 
     meas = struct('Enabled', false, 'V', [], 'I', [], ...
-                  'VId', "", 'IId', "", 'Faults', 0, 'Cfg', cfg.Dmm);
+                  'VId', "", 'IId', "", 'Faults', 0, 'Cfg', cfg.Dmm, ...
+                  'VOpenSeen', NaN, 'VLadder', 0, 'VOpen', 0);
 
     if ~cfg.Dmm.Enabled
         return
@@ -2219,7 +2229,7 @@ function range = pickVoltageRange(cfg, vocSeen)
     end
 end
 
-function probeRanges(board, meas, cfg, plan)
+function [cfg, meas] = probeRanges(board, meas, cfg, plan)
 % Measures the two numbers the meters have to be sized from, instead of
 % being told them.
 %
@@ -2249,7 +2259,7 @@ function probeRanges(board, meas, cfg, plan)
     wantV = cfg.Dmm.V.Range <= 0 && cfg.Cell.VocFull <= 0;
     wantI = cfg.Dmm.I.Range <= 0 && cfg.Cell.IscFull <= 0;
 
-    if ~wantV && ~wantI
+    if ~wantV && ~wantI && ~cfg.Timing.Measure
         return
     end
 
@@ -2278,6 +2288,8 @@ function probeRanges(board, meas, cfg, plan)
     % leave the board in while the meters are being reconfigured.
     enterSafeState(board);
 
+    meas.VOpenSeen = voc;
+
     vRange = pickVoltageRange(cfg, voc);
     iRange = pickCurrentRange(isc, cfg);
 
@@ -2300,6 +2312,172 @@ function probeRanges(board, meas, cfg, plan)
     end
 
     reportKnee(plan, voc, isc);
+
+    if cfg.Timing.Measure
+        cfg = measureSettle(board, meas, cfg, plan);
+    end
+end
+
+function cfg = measureSettle(board, meas, cfg, plan)
+% Watches the cell settle and sets its capacitance from what that takes,
+% instead of leaving C_LOAD to stand for a junction nobody characterised.
+%
+% Done at the slowest state there is, the top of the ladder, because
+% settling is RC and R is largest there. Reading as fast as the ammeter
+% will go and finding when the readings stop moving gives a time; dividing
+% it by the tau count and that resistance gives a capacitance, which the
+% existing settle formula then scales correctly for every other state. One
+% measurement at the worst case, not a number repeated blindly at all of
+% them.
+%
+% This matters because guessing low does not add noise, it tilts the
+% curve. An under-settled point reads a current still falling toward its
+% value, the error grows with R, and R is what the sweep is ordered by, so
+% the whole plateau leans. That is exactly the shape the first cell run
+% showed: current climbing 5.7% from the bottom of the ladder to the top,
+% which was read as the cell doing something interesting.
+
+    ladder = [plan.Mode] ~= "SHORT" & [plan.Mode] ~= "OPEN";
+    [rTop, at] = max([plan.Resistance] .* ladder);
+    tol   = 0.002;                  % 0.2%, a few counts at 6.5 digits
+    limit = 5;                      % s, past which it is not settling
+
+    applyState(board, plan(at), 0);
+
+    times   = zeros(1, 256);
+    reading = nan(1, 256);
+    n       = 0;
+    clock   = tic;
+
+    while n < numel(times) && toc(clock) < limit
+        n = n + 1;
+        try
+            reading(n) = meterReadOnce(meas.I);
+        catch
+            reading(n) = NaN;
+        end
+        times(n) = toc(clock);
+    end
+
+    enterSafeState(board);
+
+    reading = reading(1:n);
+    times   = times(1:n);
+    good    = ~isnan(reading);
+
+    if sum(good) < 4
+        fprintf("  settling: the ammeter would not read, keeping " + ...
+            "C_LOAD at %g F.\n", cfg.Timing.CLoad);
+        return
+    end
+
+    % The value it ends at, taken from the last quarter so a slow tail
+    % cannot be mistaken for the answer, then the last moment the reading
+    % was still outside tolerance of it.
+    final = median(reading(good & times >= 0.75 * times(n)));
+    moved = find(good & abs(reading - final) > tol * abs(final), 1, "last");
+
+    if isempty(moved)
+        % Within tolerance by the first reading, which cannot resolve
+        % anything faster than one conversion plus the bus. Reporting that
+        % latency as a settling time would turn the meter's own speed into
+        % a cell capacitance, so it reports nothing and the configured
+        % allowance stands.
+        fprintf("  settling: already inside %.1f%% at the first reading " + ...
+            "(%.0f ms), so it\n  is faster than this can measure. " + ...
+            "CELL_SETTLE stands at %g s.\n", ...
+            100 * tol, 1e3 * times(1), cfg.Timing.CellSettle);
+        return
+    end
+
+    settled  = times(moved);
+    measured = settled / (cfg.Timing.TauCount * rTop);
+
+    fprintf("  settling: %.0f ms to %.1f%% at %.0f ohm, %d readings.\n", ...
+        1e3 * settled, 100 * tol, rTop, n);
+
+    if measured > cfg.Timing.CLoad
+        fprintf("  cell capacitance %.3g F, up from the %.3g F of leads " + ...
+            "and meter.\n", measured, cfg.Timing.CLoad);
+        cfg.Timing.CLoad = measured;
+    else
+        fprintf("  settled inside the existing %.3g F allowance.\n", ...
+            cfg.Timing.CLoad);
+    end
+
+    if settled >= limit - times(1)
+        warning("PVLoad:SettleUnfinished", ...
+            "The cell was still moving after %g s at %.0f ohm. The sweep " + ...
+            "will hold every state for what that implies, which is slow, " + ...
+            "and the reading may still be early.", limit, rTop);
+    end
+end
+
+function meas = narrowVoltmeter(board, meas, cfg, plan)
+% The OPEN state is the only one that needs the wide voltage range, and it
+% is one state out of 769.
+%
+% Everything else sits below the top of the ladder, which on a weakly lit
+% cell is a small fraction of Voc: the first cell run spent 768 states
+% between 0.6 mV and 0.68 V with the meter on the 10 V range its 3.4 V
+% OPEN reading had asked for. On the 34401A that range carries 10 uV of
+% resolution and 0.0005% of range of floor error, which at 0.1 V is 50 uV
+% against 3.5 uV of gain error, so the floor is the whole error. One range
+% down cuts it tenfold, and the plateau is where every point of the curve
+% lives.
+%
+% The plan is ordered by resistance and OPEN is last, so the switch back
+% happens once, at the end. That is what makes this affordable: a range
+% change costs a reconfiguration and the sweep cannot have one per point.
+
+    meas.VLadder = 0;
+    meas.VOpen   = 0;
+
+    if ~meas.Enabled || meas.V.Range > 0 || isnan(meas.VOpenSeen)
+        return
+    end
+
+    ladder  = [plan.Mode] ~= "SHORT" & [plan.Mode] ~= "OPEN";
+    [~, at] = max([plan.Resistance] .* ladder);
+
+    applyState(board, plan(at), settleFor(plan(at), "", cfg));
+
+    try
+        top = abs(meterReadOnce(meas.V));
+    catch
+        top = NaN;
+    end
+
+    enterSafeState(board);
+
+    if isnan(top) || top <= 0
+        return
+    end
+
+    wide   = pickVoltageRange(cfg, meas.VOpenSeen);
+    narrow = pickVoltageRange(cfg, top);
+
+    if narrow >= wide
+        return                      % one range already covers both
+    end
+
+    meas.VLadder = narrow;
+    meas.VOpen   = wide;
+    configureMeter(meas.V, "voltage", narrow);
+
+    fprintf("  ladder tops out at %.4f V, so it runs on the %g V range " + ...
+        "and only\n  the OPEN state uses %g V.\n", top, narrow, wide);
+end
+
+function widenForOpen(meas, state, prevMode)
+% The one range change the sweep makes, on the way into the OPEN state.
+% Called with the state about to be applied, so the meter is already on
+% the wide range before the cell is put behind 470 kohm.
+
+    if meas.VLadder <= 0 || state.Mode ~= "OPEN" || prevMode == "OPEN"
+        return
+    end
+    configureMeter(meas.V, "voltage", meas.VOpen);
 end
 
 function reportKnee(plan, voc, isc)
@@ -2678,6 +2856,7 @@ function results = runSweep(board, meas, plan, cfg, log)
 
     for k = 1:total
         settle = settleFor(plan(k), prev, cfg);
+        widenForOpen(meas, plan(k), prev);
         applyState(board, plan(k), settle);
         prev = plan(k).Mode;
 
