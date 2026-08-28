@@ -215,20 +215,36 @@ it look intermittent when it is not.
 write terminator is not involved: `CR/LF` and `LF` behave identically, with and
 without the flush.
 
-## The first command written to the 196 never arrives
+## The 196 misbehaves for the first few exchanges of every session
 
-Separate fault from the one above, and the flush does not touch it: that one
-loses a reply on the way in, this one loses a command on the way out. The first
-write after `visadev` opens the session is dropped, so the first query times out
-however long the timeout is. Send the same query again and it answers at once,
-and `U1` afterwards is all zeros, so the command was lost rather than rejected.
-Reproduced on every fresh session; the 34401A does not do it.
+One fault with many faces, and the faces were chased separately before the
+cause was found: the first command of a session vanishing, `U0` answered with a
+reading instead of the status word, `TRIGGER ERROR` on the display, and an
+IDDCO latching into the error word with every command sent being valid, often
+surfacing an exchange or two after whatever caused it.
 
-Which meter opens first does not matter, and neither does anything the front
-panel shows. The panel printing something like `n7u0` during the failure is the
-tail of the dropped exchange and not a state to chase.
+The cause is MATLAB. `visadev` sends `*IDN?` to whatever it opens and offers no
+way to turn that off (confirmed by MathWorks support, MATLAB Answers 2118301;
+the suppression flag added in R2025a is on `visadevlist`, not `visadev`). The
+196 predates SCPI and executes nothing without a trailing `X`, so the `*IDN?`
+sits half-parsed in its input. The next real command is concatenated onto that
+fragment, and the `X` it ends with executes the combined garbage: the command
+is consumed, IDDCO latches for a string nobody knowingly sent, and both appear
+late because nothing runs until that `X` arrives. Two writes in quick
+succession into a fresh session make it worse, mangling into one string.
 
-`openMeter` now writes one bare `X` after opening a DDC session and flushes
-before the first question, so the throwaway command is the one that is lost. If
-it does arrive it is only a trigger, and the flush eats the conversion it may
-have started.
+Separately, a power-cycled 196 wakes in `T0`, continuous on talk: being
+addressed to talk is itself a trigger, so every read manufactures a fresh
+reading and no query can be answered with anything else. No flush wins that
+race.
+
+`primeDdc` handles all of it at open: a bare `X` to execute and discard the
+stranded fragment, one `T5` per attempt to leave trigger-on-talk, and the error
+word read until clean, retrying the `T5` if the drain keeps collecting
+readings. Because latched phantom bits can still surface later, setup
+verification does not trust `U1` at all: `ddcVerifySetup` reads the `U0`
+machine word back and compares the digits against what was sent, positions
+mapped on this bench by toggling one setting at a time. The error word says
+what the meter has been through; the machine word says what it is in.
+
+The 34401A is immune: `*IDN?` is exactly what it expects.

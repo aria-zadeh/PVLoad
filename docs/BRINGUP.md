@@ -201,18 +201,24 @@ from table 3-8, the 24 ms conversion from table 3-16, the reading tags from
 figure 3-6. Inference had the lowest amps range at 3 mA where it is 300 uA, and
 the conversion at 350 ms where it is 24 ms.
 
-**The input-only flush and the `DCI` tag passed on the bench.** One
+**The input-only flush and the `DCI` tag passed on the bench.** Repeated
 `RUN = "meters"` with both instruments attached and nothing connected to their
-inputs: both identify, both configure with clean error words, and ten readings
-sit at noise, volts around a hundred microvolts and current at one count on the
-30 mA range. The 196 read amps and the 34401A volts.
+inputs: both identify, both configure, and ten readings sit at noise, volts
+around a hundred microvolts and current at one count on the 30 mA range. The
+196 read amps on its face and the 34401A volts.
 
-**The 196 drops the first command of a fresh session.** Found by the same run:
-`U0` timed out on the first attempt every time and answered immediately on the
-second, with `U1` clean, so the write was lost rather than rejected. Distinct
-from the stale-reply fault already recorded, which flushing fixes and this does
-not. `openMeter` writes a throwaway `X` and flushes before the first question;
-`docs/TROUBLESHOOTING.md` has the symptom written up.
+**Every session-open fault traced to one cause: `visadev` sends `*IDN?` on
+open.** It cannot be suppressed in R2022a, the 196 cannot execute it without a
+trailing `X`, and the stranded fragment eats the next command and latches
+IDDCO late. Chased as three separate faults before that: a first command that
+vanished, `U0` answered with readings after a power cycle (power-on `T0`,
+trigger on talk), and `TRIGGER ERROR` on the display with every command sent
+being valid. `primeDdc` absorbs it at open and `ddcVerifySetup` now checks the
+`U0` machine word digit against what was sent instead of trusting `U1`; the
+word positions were mapped on this bench by toggling one setting at a time
+(`F` at 3, `K` at 6, `R` at 18, `S` at 19, `T` at 20, `Z` at 27, counted after
+the prefix). Error-word bits measured while at it: `F9X` latches the first
+digit, `Q9X` the eleventh. `docs/TROUBLESHOOTING.md` has the full story.
 
 **Overlapped reads are still assumed rather than shown.** Both meters have been
 triggered and collected together, but never against a source that would make a

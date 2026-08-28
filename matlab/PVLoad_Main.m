@@ -224,6 +224,7 @@ DDC_196 = struct( ...
     'Range',      "R%d", ...
     'AutoRange',  "R0", ...
     'Prefixes',   "DCV|ACV|OHM|OCO|DCI|ACI|dBV|dBI", ...
+    'StatusMap',  struct('F', 3, 'K', 6, 'R', 18, 'S', 19, 'T', 20, 'Z', 27), ...
     'Common',     "Z0B0G0M0K2S2T5", ...
     'Machine',    "U0", ...
     'Error',      "U1", ...
@@ -250,6 +251,12 @@ DDC_196 = struct( ...
 %   the DCA another Keithley uses, and a decoder that does not know that
 %   turns every current reading into NaN once the meter is actually on
 %   amps. The bench found this the slow way.
+%
+%   StatusMap is where each setting's digit sits in the U0 machine word,
+%   counted after the 196 prefix. Mapped on the bench by toggling one
+%   setting at a time and diffing the word, because the error word cannot
+%   be trusted after a fresh session open (see primeDdc) and the machine
+%   word is what setup verification reads instead.
 
 % Agilent 34401A, manual 34401-90004. Ranges are chapter 1, the input
 % resistance rule is chapter 3 under Measurement Configuration, and the
@@ -1538,21 +1545,59 @@ function m = openMeter(spec, role)
 end
 
 function primeDdc(m)
-% The first command written to a 196 after visadev opens the session does
-% not reach it. Measured on the bench and reproducible on every run: the
-% query that follows times out, the same query sent again answers at once,
-% and the error word afterwards is all zeros, so nothing was rejected. The
-% write is simply lost while the session comes up, and flushing the input
-% does not help because the problem is on the way out rather than the way
-% in.
+% visadev sends *IDN? to whatever it opens and offers no way to turn that
+% off (MathWorks support, MATLAB Answers 2118301). The 196 predates SCPI:
+% none of those characters execute without a trailing X, so the fragment
+% sits in its parser and the next real command is concatenated onto it.
+% The X that command ends with then executes the combined garbage. That is
+% the whole family of session-open faults this bench measured: the first
+% command that vanishes, the IDDCO that latches with no invalid command
+% ever sent, and both surfacing an exchange or two late. The error word is
+% therefore unreliable near an open, which is why setup verification reads
+% the machine word instead (ddcVerifySetup).
 %
-% A bare X is sent here to be the one that is lost. If it does arrive it is
-% a trigger under T5 and nothing else, so the conversion it may start is
-% flushed before anything asks a question.
+% The bare X below is the terminator visadev never sent. It executes the
+% stranded fragment at a time of our choosing, as the only command in the
+% parser, and whatever that latches is drained here before anything is
+% asked in earnest.
+%
+% T5 must land before the first question because power-on is T0,
+% continuous on talk, table 3-8: being addressed to talk is itself a
+% trigger, so every read manufactures a fresh reading and a query comes
+% back "NDCI-00.00079E-3" instead of its answer. A drain that keeps
+% answering with readings or nothing means the T5 was itself swallowed, so
+% the attempt loop sends it again. One write per attempt: two writes in
+% quick succession into a fresh session get mangled into one string,
+% measured here as an IDDCO with every individual command valid.
 
+    pause(0.5);
     ddcTell(m.Port, "");
-    pause(0.1);
+    pause(0.3);
     flush(m.Port, "input");
+
+    for attempt = 1:3
+        ddcTell(m.Port, "T5");
+        pause(0.5);
+        flush(m.Port, "input");
+
+        for k = 1:4
+            try
+                word = ddcAsk(m, m.Ddc.Error);
+            catch
+                break
+            end
+            flags = extractAfter(word, m.Ddc.IdPrefix);
+            if ~ismissing(flags) && strlength(flags) > 0 && ...
+               all(char(flags) == '0')
+                return
+            end
+        end
+    end
+
+    error("PVLoad:MeterWillNotSettle", ...
+        "The %s at %s never answered %s with a clean word during " + ...
+        "priming. Power-cycle it and check the front panel.", ...
+        m.Label, m.Address, m.Ddc.Error);
 end
 
 function text = availableResources()
@@ -1583,12 +1628,13 @@ function word = identifyMeter(m, role)
 % not be the same instrument: the wrong profile would otherwise show up as
 % a range number meaning something different from what was intended.
 
-    D    = m.Ddc;
-    word = meterAsk(m, D.Machine);
+    D = m.Ddc;
 
     if D.Dialect == "scpi"
+        word  = meterAsk(m, D.Machine);
         found = contains(word, D.IdPrefix);
     else
+        word  = ddcAskStatus(m, D.Machine);
         found = startsWith(word, D.IdPrefix);
     end
 
@@ -1603,22 +1649,23 @@ end
 function configureMeter(m, role, range)
 % Function and range travel together in both dialects, for the same reason
 % in each: an R number means a different range in every function, and CONF
-% takes the two as one command. Then the offset is nulled for the range
-% just selected, then the error queue is read.
+% takes the two as one command. Then the setup is checked, each dialect its
+% own way: the 34401A by draining its error queue, the 196 by reading the
+% machine status word back and comparing digits, because visadev poisons
+% the 196's error word at every open (see primeDdc) and a latched phantom
+% bit can surface commands later. The machine word is the setup; the error
+% word is only history.
 
     if m.Ddc.Dialect == "scpi"
         scpiConfigure(m, role, range);
+        assertMeterHappy(m, role);
     else
-        ddcConfigure(m, role, range);
-    end
-
-    assertMeterHappy(m, role);
-
-    if m.Ddc.Dialect ~= "scpi"
-        % The error query's own X triggered one more conversion. Left in the
-        % buffer it would become the sweep's first reading, and every point
-        % after it would carry the previous state's value: a curve shifted
-        % by one rather than an obviously broken one.
+        sent = ddcConfigure(m, role, range);
+        ddcVerifySetup(m, role, sent);
+        % The queries above each triggered one more conversion. Left in
+        % the buffer it would become the sweep's first reading, and every
+        % point after it would carry the previous state's value: a curve
+        % shifted by one rather than an obviously broken one.
         flush(m.Port, "input");
     end
 end
@@ -1641,7 +1688,9 @@ function node = functionFor(D, role)
     end
 end
 
-function ddcConfigure(m, role, range)
+function sent = ddcConfigure(m, role, range)
+% Returns what it sent, so the verification that follows knows which
+% digits to expect in the machine word.
 
     D  = m.Ddc;
     fn = functionFor(D, role);
@@ -1656,7 +1705,12 @@ function ddcConfigure(m, role, range)
             rangeCode(range, m.Ranges, rangeSetting(role), m.Label));
     end
 
-    ddcTell(m.Port, command + D.Common);
+    sent = command + D.Common;
+    ddcTell(m.Port, sent);
+
+    % This string's X is also a trigger; the query that follows would
+    % otherwise race the conversion it starts.
+    pause(0.2);
 end
 
 function scpiConfigure(m, role, range)
@@ -1702,34 +1756,59 @@ end
 
 function assertMeterHappy(m, role)
 % Whatever a command the meter did not understand cost, it is cheaper to
-% find here than in the CSV. On the 196 the U1 query returns the error
-% condition word, the model number and then one digit per error; anything
-% but zeros is a rejected command. On the 34401A SYST:ERR? pops one entry
-% off a queue and a clean one reads +0.
+% find here than in the CSV. SYST:ERR? pops one entry off a queue and a
+% clean one reads +0. SCPI only; the 196's setup is checked against the
+% machine word in ddcVerifySetup, because its error word is not
+% trustworthy near a session open.
 %
-% The SCPI queue is drained rather than sampled. A setup that sends nine
+% The queue is drained rather than sampled. A setup that sends nine
 % commands can have several rejected, and popping one entry per run turns
 % bringing up a profile into one round trip per mistake.
 
-    D = m.Ddc;
+    faults = scpiErrorQueue(m);
+    if isempty(faults)
+        return
+    end
+    error("PVLoad:MeterRejectedSetup", ...
+        "The %s meter (%s) answered %s with %s.", ...
+        role, m.Label, m.Ddc.Error, strjoin("""" + faults + """", "; "));
+end
 
-    if D.Dialect == "scpi"
-        faults = scpiErrorQueue(m);
-        if isempty(faults)
-            return
-        end
+function ddcVerifySetup(m, role, sent)
+% The machine word is read back and every setting the setup string carried
+% is compared digit by digit, positions from the profile StatusMap. This
+% checks what the meter is actually in, not what it complained about,
+% which matters because a phantom IDDCO from the session open (see
+% primeDdc) can surface in the error word commands after the fact. A
+% setting the meter refused shows up here as a digit that did not move.
+%
+% R0, the ohms autorange, is skipped: under autorange the word reports
+% whichever range the meter has chosen, which is information rather than
+% disagreement.
+
+    word  = ddcAskStatus(m, m.Ddc.Machine);
+    state = extractAfter(word, m.Ddc.IdPrefix);
+    map   = m.Ddc.StatusMap;
+
+    if ismissing(state) || strlength(state) < map.Z
         error("PVLoad:MeterRejectedSetup", ...
-            "The %s meter (%s) answered %s with %s.", ...
-            role, m.Label, D.Error, strjoin("""" + faults + """", "; "));
+            "The %s meter (%s) answered %s with ""%s"", which is not a " + ...
+            "machine status word.", role, m.Label, m.Ddc.Machine, word);
     end
 
-    word  = meterAsk(m, D.Error);
-    flags = extractAfter(word, D.IdPrefix);
-
-    if ismissing(flags) || strlength(flags) == 0 || any(char(flags) ~= '0')
-        error("PVLoad:MeterRejectedSetup", ...
-            "The %s meter (%s) answered %s with ""%s"".", ...
-            role, m.Label, D.Error, word);
+    text = char(state);
+    for letter = string(fieldnames(map))'
+        digit = regexp(sent, letter + "(\d)", "tokens", "once");
+        if isempty(digit) || (letter == "R" && digit{1} == '0')
+            continue
+        end
+        at = map.(letter);
+        if text(at) ~= char(digit{1})
+            error("PVLoad:MeterRejectedSetup", ...
+                "The %s meter (%s) was sent %s%s but its machine word " + ...
+                "reads %s%c at that position: ""%s"".", role, m.Label, ...
+                letter, string(digit{1}), letter, text(at), word);
+        end
     end
 end
 
@@ -1972,6 +2051,27 @@ function reply = meterAsk(m, command)
     end
 end
 
+function word = ddcAskStatus(m, command)
+% A status query whose answer must be the status word, not a reading. The
+% flush in ddcAsk clears the host buffer, but a stale reading can be
+% sitting in the meter itself: every command string ends in an X, under T5
+% every X is a trigger, and the reading that leaves is handed out on the
+% next talk even when a query has been answered since. Seen on the bench as
+% U1 answering "NDCI-00.00084E-3" after a clean identify. A reading is
+% recognisable, N or O and then a function tag, so up to two of them are
+% read past rather than mistaken for the word; anything else is returned
+% for the caller to judge.
+
+    word = ddcAsk(m, command);
+    for k = 1:2
+        if startsWith(word, m.Ddc.IdPrefix) || ...
+           ~startsWith(word, ["N", "O"])
+            return
+        end
+        word = strtrim(string(readline(m.Port)));
+    end
+end
+
 function ddcTell(port, command)
 % Nothing happens on a 196 until an X arrives, so every command leaves
 % through here and every one of them gets one. An empty command is a bare
@@ -2005,6 +2105,14 @@ function reply = ddcAsk(m, command)
         error("PVLoad:MeterNoReply", ...
             "No reply to ""%sX"" within %g s.", command, m.Timeout);
     end
+
+    % The query's own X started a conversion, K2 means the bus is not held
+    % off while it runs, and a command following too closely is a TRIGGER
+    % OVERRUN, latched and lit on the display. The conversion is waited out
+    % before the caller can send anything. The overlapped sweep path goes
+    % through meterTrigger and meterFetch, never through here, so this
+    % costs the setup a few tenths and a non-overlapped reading 0.1 s.
+    pause(0.1);
 end
 
 function closeMeters(meas)
