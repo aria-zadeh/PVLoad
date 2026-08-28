@@ -23,7 +23,7 @@ clc;
 %   "meters"  both sweep meters only
 %   "sweep"   the full experiment, written to CSV
 
-RUN = "meters";  
+RUN = "sweep";  
 
 
 % Ports and addresses, and what each one needs on the bench. Wiring and the
