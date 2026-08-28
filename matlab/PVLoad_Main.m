@@ -118,9 +118,44 @@ WIPER_CODES = [0 255];
 
 WRITE_CSV = true;
 OUT_DIR   = "../data/sweep_data";
-RUN_TAG   = "ILASER0p45";            % added to the file names. this is where the
+RUN_TAG   = "ILASER0p600";            % added to the file names. this is where the
                            % illumination goes, since nothing else records
                            % it. e.g. "cell3_lamp60"
+
+
+% the sweep can spend its states where the curve earns them instead of
+% evenly along the ladder. a coarse pass measures the whole range first,
+% and then states are added between measured neighbours wherever the curve
+% bends or a gap is wide enough to hide the knee, round after round, until
+% neither is true. every decision comes from the measured voltages and
+% currents; the resistance model keeps its old job of ordering the states
+% and nothing more. SHORT and OPEN are always in the coarse pass, so Isc
+% and Voc do not depend on any of this. CODE_STEP is ignored while this is
+% on: the coarse thinning is ADAPT_COARSE_STEP and refinement can land on
+% any of the 769 states.
+
+ADAPTIVE_SWEEP    = true;
+ADAPT_COARSE_STEP = 32;    % wiper codes between coarse states, the same
+                           % thinning CODE_STEP does. 32 makes the first
+                           % pass 27 states.
+ADAPT_GAP         = 0.12;  % fraction of the measured I-V span. a segment
+                           % between neighbours longer than this is split
+                           % whether or not it looks bent, which is what
+                           % stops a knee hiding between two coarse states
+                           % that each read as flat.
+ADAPT_BEND        = 0.020; % fraction of the span a point may sit off the
+                           % chord of its neighbours before the curve is
+                           % bent there and both segments at it are split.
+                           % has to sit above the illumination's own
+                           % wobble: the 174402 run moved 1-2% in seconds,
+                           % and a threshold below that spends rounds
+                           % splitting straight segments the light bent.
+ADAPT_MAX_POINTS  = 200;   % states the run may spend in total. reached,
+                           % it stops further refinement; it never skips a
+                           % state already queued or cuts a reading short.
+ADAPT_MAX_ROUNDS  = 12;    % passes including the coarse one. each round
+                           % halves the gaps it touches, so this resolves
+                           % any gap the ladder has with room to spare.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -438,6 +473,14 @@ cfg.Cell = struct( ...
     'VocFull', VOC_FULL, ...
     'AreaCm2', CELL_AREA_CM2);
 
+cfg.Adapt = struct( ...
+    'Enabled',    ADAPTIVE_SWEEP, ...
+    'CoarseStep', ADAPT_COARSE_STEP, ...
+    'Gap',        ADAPT_GAP, ...
+    'Bend',       ADAPT_BEND, ...
+    'MaxPoints',  ADAPT_MAX_POINTS, ...
+    'MaxRounds',  ADAPT_MAX_ROUNDS);
+
 % Each meter gets one spec holding everything about it: its profile, where
 % it lives, which range list applies to the function it will be asked for,
 % and how long a conversion takes. That is what travels down to the bus
@@ -495,7 +538,11 @@ end
 
 function runPlanOnly(cfg)
 
-    plan = buildSweepPlan(cfg);
+    if cfg.Adapt.Enabled
+        plan = buildMasterPlan(cfg);
+    else
+        plan = buildSweepPlan(cfg);
+    end
     reportPlan(cfg, plan);
     fprintf("\nNothing was opened. Set RUN to board, meters or sweep to " + ...
         "use hardware.\n");
@@ -1021,7 +1068,14 @@ function results = runSweepAll(cfg)
 % curves is several runs of this rather than one run of several levels.
 % RUN_TAG is the only record of which was which.
 
-    plan = buildSweepPlan(cfg);
+    % The adaptive sweep refines into the gaps of its coarse pass, so it
+    % works against the full plan whatever CODE_STEP says. The fixed sweep
+    % keeps its thinned one.
+    if cfg.Adapt.Enabled
+        plan = buildMasterPlan(cfg);
+    else
+        plan = buildSweepPlan(cfg);
+    end
     reportPlan(cfg, plan);
 
     board = connectBoard(cfg);
@@ -1042,7 +1096,7 @@ function results = runSweepAll(cfg)
 
     results = runExperiment(board, meas, plan, cfg, log);
 
-    fprintf("\nRun complete. %d states.\n", numel(plan));
+    fprintf("\nRun complete. %d states.\n", numel(results.StateIndex));
     if strlength(log.Readings) > 0
         fprintf("Readings: %s\n", log.Readings);
     end
@@ -1347,6 +1401,27 @@ function plan = buildSweepPlan(cfg)
     plan        = states(order);          % earlier-listed mode wins
 end
 
+function master = buildMasterPlan(cfg)
+% Every state the board can make, whatever CODE_STEP says. The adaptive
+% sweep thins for itself and refines into the gaps, so it needs the full
+% 769 to choose from.
+
+    cfg.CodeStep = 1;
+    master = buildSweepPlan(cfg);
+end
+
+function idx = coarseIndices(master, cfg)
+% The states the adaptive coarse pass measures: the thinning CODE_STEP
+% does, by wiper code and never by resistance, plus both endpoints.
+
+    step = cfg.Adapt.CoarseStep;
+    mode = [master.Mode];
+    total = [master.Code1] + [master.Code2];
+
+    keep = mode == "SHORT" | mode == "OPEN" | mod(total, step) == 0;
+    idx  = find(keep);
+end
+
 function states = enumerateStates(cfg)
 % LOW is listed before FULL so a resistance tie visits the LOW state first,
 % putting one fewer wiper resistance in the path.
@@ -1418,6 +1493,37 @@ function assertConfig(cfg)
         error("PVLoad:BadWiperCodes", ...
             "WIPER_CODES must be whole numbers from 0 to %d, which is the " + ...
             "range of a FULL code sum.", 2 * cfg.WiperSteps);
+    end
+
+    A = cfg.Adapt;
+    if A.Enabled
+        if A.CoarseStep < 1 || A.CoarseStep > cfg.WiperSteps || ...
+           mod(A.CoarseStep, 1) ~= 0
+            error("PVLoad:BadAdaptStep", ...
+                "ADAPT_COARSE_STEP is %g. It thins by wiper code the way " + ...
+                "CODE_STEP does, so it must be a whole number from 1 to " + ...
+                "%d.", A.CoarseStep, cfg.WiperSteps);
+        end
+        if A.Gap <= 0 || A.Gap > 1 || A.Bend <= 0 || A.Bend > 1
+            error("PVLoad:BadAdaptThreshold", ...
+                "ADAPT_GAP and ADAPT_BEND are fractions of the measured " + ...
+                "I-V span, above 0 and at most 1. They are %g and %g.", ...
+                A.Gap, A.Bend);
+        end
+        nCoarse = numel(0:A.CoarseStep:cfg.WiperSteps) + ...
+                  numel(0:A.CoarseStep:2 * cfg.WiperSteps) + ...
+                  cfg.IncludeShort + cfg.IncludeOpen;
+        if A.MaxPoints < nCoarse
+            error("PVLoad:BadAdaptCap", ...
+                "ADAPT_MAX_POINTS is %g and the coarse pass alone is %d " + ...
+                "states. The cap has to hold at least the coarse pass.", ...
+                A.MaxPoints, nCoarse);
+        end
+        if A.MaxRounds < 1 || mod(A.MaxRounds, 1) ~= 0
+            error("PVLoad:BadAdaptRounds", ...
+                "ADAPT_MAX_ROUNDS is %g. It must be a whole number of at " + ...
+                "least 1.", A.MaxRounds);
+        end
     end
 
     D = cfg.Dmm;
@@ -1528,8 +1634,18 @@ function reportPlan(cfg, plan)
     perPoint = estimatePointTime(cfg, plan);
     total    = perPoint * numel(plan);
 
-    fprintf("Sweep plan: %d load states, %g ohm to %g ohm.\n", ...
-        numel(plan), plan(1).Resistance, plan(end).Resistance);
+    if cfg.Adapt.Enabled
+        nCoarse = numel(coarseIndices(plan, cfg));
+        cap     = min(cfg.Adapt.MaxPoints, numel(plan));
+        fprintf("Adaptive sweep: %d coarse states of %d possible, " + ...
+            "%g ohm to %g ohm.\n", nCoarse, numel(plan), ...
+            plan(1).Resistance, plan(end).Resistance);
+        fprintf("Refinement then adds states where the measured curve " + ...
+            "bends, to at most %d.\n", cap);
+    else
+        fprintf("Sweep plan: %d load states, %g ohm to %g ohm.\n", ...
+            numel(plan), plan(1).Resistance, plan(end).Resistance);
+    end
 
     % Whether the cell is described here or found at the start of the run.
     % The OPEN state check that used to live here has moved to probeRanges,
@@ -1552,8 +1668,15 @@ function reportPlan(cfg, plan)
         fprintf("Meters: none. Voltage and current will be logged as NaN.\n");
     end
 
-    fprintf("About %.0f ms per point. Estimated run time %.1f minutes.\n", ...
-        1e3 * perPoint, total / 60);
+    if cfg.Adapt.Enabled
+        fprintf("About %.0f ms per point. Estimated run time %.1f to " + ...
+            "%.1f minutes, set by how much\nof the curve turns out to " + ...
+            "bend.\n", 1e3 * perPoint, perPoint * nCoarse / 60, ...
+            perPoint * cap / 60);
+    else
+        fprintf("About %.0f ms per point. Estimated run time %.1f " + ...
+            "minutes.\n", 1e3 * perPoint, total / 60);
+    end
 end
 
 function t = estimatePointTime(cfg, plan)
@@ -2615,7 +2738,12 @@ function [value, rangeNow, changes] = followRange(m, role, ranges, ...
 % exactly the state where the curve turns, that being where the reading
 % climbs fastest.
 
-    if isnan(value)
+    % Widened one range at a time until the reading fits or the meter has
+    % nothing wider, because an overflow says nothing about how far over
+    % it is. An adaptive sweep makes multi-decade jumps routine: a
+    % refinement round ends near OPEN with the meter narrowed to its
+    % floor, and the next one starts back at the bottom of the ladder.
+    while isnan(value)
         wider = min(ranges(ranges > rangeNow * 1.0001));
         if isempty(wider)
             return                  % already as wide as the meter goes
@@ -2628,7 +2756,6 @@ function [value, rangeNow, changes] = followRange(m, role, ranges, ...
         catch
             value = NaN;
         end
-        return
     end
 
     magnitude = abs(value);
@@ -2961,7 +3088,11 @@ function results = runExperiment(board, meas, plan, cfg, log)
         fprintf("Self-test skipped. The potentiometers are unverified.\n");
     end
 
-    results = runSweep(board, meas, plan, cfg, log);
+    if cfg.Adapt.Enabled
+        results = runSweepAdaptive(board, meas, plan, cfg, log);
+    else
+        results = runSweep(board, meas, plan, cfg, log);
+    end
 
     enterSafeState(board);
     clear guard;
@@ -3018,6 +3149,235 @@ function results = runSweep(board, meas, plan, cfg, log)
     fprintf("%.0f ms per state in the end, against the %.0f ms " + ...
         "estimated.\n", 1e3 * toc(started) / total, ...
         1e3 * estimatePointTime(cfg, plan));
+    reportRangeChanges(meas);
+end
+
+function results = runSweepAdaptive(board, meas, master, cfg, log)
+% The coarse pass, then rounds of states added between measured neighbours
+% wherever refineIntervals asks, until it stops asking or the point cap
+% lands. Refinement decides from the measured columns only; the master
+% plan supplies the codes and the order, which is the job the resistance
+% model has always had. Every round runs in that order, so the settles see
+% the same ascending walk the fixed sweep makes.
+%
+% Faults follow runSweep's rule: the first point failing is
+% misconfiguration, and MaxFaults in a row aborts.
+
+    cap      = min(cfg.Adapt.MaxPoints, numel(master));
+    results  = allocateResults(cap);
+    measured = false(numel(master), 1);
+    V        = nan(numel(master), 1);
+    I        = nan(numel(master), 1);
+
+    row     = 0;
+    written = 0;
+    faults  = 0;
+    run     = 0;
+    prev    = "";
+    started = tic;
+    queue   = coarseIndices(master, cfg);
+
+    for round = 1:cfg.Adapt.MaxRounds
+        for k = queue(:)'
+            if row >= cap
+                break
+            end
+
+            settle = settleFor(master(k), prev, cfg);
+            applyState(board, master(k), settle);
+            prev = master(k).Mode;
+
+            [volts, amps, fault, meas] = readPoint(meas, cfg);
+
+            row = row + 1;
+            if fault
+                faults = faults + 1;
+                run    = run + 1;
+                if row == 1 || run > cfg.Dmm.MaxFaults
+                    error("PVLoad:MeterUnresponsive", ...
+                        "The meters failed %d reading(s) in a row at " + ...
+                        "state %d. Check the cabling and the addresses.", ...
+                        run, row);
+                end
+            else
+                run = 0;
+            end
+
+            measured(k) = true;
+            V(k) = volts;
+            I(k) = amps;
+            results = recordPoint(results, row, master(k), settle, ...
+                volts, amps);
+
+            if cfg.PrintStatus
+                printState(row, cap, master(k), volts, amps);
+            end
+
+            if row - written >= cfg.Out.Chunk
+                appendPoints(log, results, (written + 1):row, written == 0);
+                written = row;
+            end
+        end
+
+        if row >= cap
+            fprintf("The %d point cap landed, so refinement stopped " + ...
+                "there. Raising ADAPT_MAX_POINTS\nwould let it " + ...
+                "continue.\n", cap);
+            break
+        end
+
+        queue = refineIntervals(measured, V, I, cfg);
+        queue = queue(~measured(queue));
+        if isempty(queue)
+            break
+        end
+        if cfg.PrintStatus
+            fprintf("-- round %d adds %d state(s) where the measured " + ...
+                "curve bends --\n", round + 1, numel(queue));
+        end
+    end
+
+    results = trimResults(results, row);
+    if row > written
+        appendPoints(log, results, (written + 1):row, written == 0);
+    end
+
+    checkDrift(board, meas, master, results, prev, cfg);
+
+    fprintf("\n%d of %d states measured, %d read fault(s).\n", ...
+        row, numel(master), faults);
+    fprintf("%.0f ms per state in the end, against the %.0f ms " + ...
+        "estimated.\n", 1e3 * toc(started) / max(row, 1), ...
+        1e3 * estimatePointTime(cfg, master));
+    reportRangeChanges(meas);
+end
+
+function next = refineIntervals(measured, V, I, cfg)
+% Where the measured curve says another state is needed. Three rules, all
+% of them read off the measured voltages and currents, normalised to the
+% measured span so one setting serves any cell:
+%
+%   - a segment between neighbours longer than Gap is split whatever its
+%     shape. a knee can sit entirely between two coarse states whose own
+%     readings both look tame, and only the length of the jump shows it.
+%   - a point sitting further than Bend off the chord of its neighbours
+%     marks a bend, and both segments at it are split.
+%   - the two segments at the largest measured power are always split, so
+%     the maximum power point ends up resolved as finely as the ladder
+%     goes even once the curve there looks locally straight.
+%
+% Splitting is by position in the master plan, which the resistance model
+% ordered: the model still only orders, the measurements decide. A
+% segment between plan neighbours cannot be split further and drops out
+% on its own, which is what ends the refinement. A state that returned
+% NaN takes no part in the geometry, so a dropped reading widens a
+% segment rather than poisoning it.
+
+    next = [];
+    idx  = find(measured(:) & ~isnan(V(:)) & ~isnan(I(:)));
+    if numel(idx) < 2
+        return
+    end
+
+    v = abs(V(idx));
+    i = abs(I(idx));
+    vSpan = max(v);
+    iSpan = max(i);
+    if vSpan <= 0 || iSpan <= 0
+        return
+    end
+    x = v / vSpan;
+    y = i / iSpan;
+
+    n    = numel(idx);
+    flag = false(n - 1, 1);
+
+    flag(hypot(diff(x), diff(y)) > cfg.Adapt.Gap) = true;
+
+    for j = 2:n - 1
+        d = chordDistance(x(j-1), y(j-1), x(j), y(j), x(j+1), y(j+1));
+        if d > cfg.Adapt.Bend
+            flag(j - 1) = true;
+            flag(j)     = true;
+        end
+    end
+
+    [~, at] = max(v .* i);
+    flag(max(at - 1, 1))     = true;
+    flag(min(at, n - 1))     = true;
+
+    for j = find(flag)'
+        mid = floor((idx(j) + idx(j + 1)) / 2);
+        if mid > idx(j) && mid < idx(j + 1)
+            next(end + 1) = mid;  %#ok<AGROW>
+        end
+    end
+    next = unique(next);
+end
+
+function checkDrift(board, meas, master, results, prev, cfg)
+% The SHORT state measured again after the last point brackets the run:
+% the cell has no memory, so a first and last reading of the same state
+% that disagree are the illumination having moved while the sweep ran,
+% and every point in between was taken somewhere along that slide. The
+% 174402 run wobbled 1-2% in seconds and the wobble is what the plateau's
+% zigzag is. Reported rather than corrected, and not a row in the CSV, so
+% the sweep's own SHORT stays the Isc.
+
+    at = find([master.Mode] == "SHORT", 1);
+    first = find(results.Mode == "SHORT", 1);
+    if ~meas.Enabled || isempty(at) || isempty(first) || ...
+       isnan(results.CurrentA(first))
+        return
+    end
+
+    applyState(board, master(at), settleFor(master(at), prev, cfg));
+    try
+        last = abs(meterReadOnce(meas.I));
+    catch
+        return
+    end
+    if isnan(last)
+        return
+    end
+
+    moved = (last - abs(results.CurrentA(first))) / ...
+            abs(results.CurrentA(first));
+    fprintf("Drift check: SHORT read %.4f mA first and %.4f mA last, " + ...
+        "%+.2f%% across the run.\n", ...
+        1e3 * abs(results.CurrentA(first)), 1e3 * last, 100 * moved);
+
+    if abs(moved) > 0.01
+        warning("PVLoad:IlluminationDrifted", ...
+            "The illumination moved %.1f%% while the sweep ran, and the " + ...
+            "scatter that puts on the curve is larger than anything the " + ...
+            "meters add. Nothing in software corrects it; a source that " + ...
+            "has warmed up does.", 100 * abs(moved));
+    end
+end
+
+function d = chordDistance(x1, y1, x2, y2, x3, y3)
+% Perpendicular distance from the middle point to the chord of its
+% neighbours, in whatever units the caller normalised to. A degenerate
+% chord makes the plain distance to the first point the answer.
+
+    len = hypot(x3 - x1, y3 - y1);
+    if len < eps
+        d = hypot(x2 - x1, y2 - y1);
+        return
+    end
+    d = abs((x3 - x1) * (y1 - y2) - (x1 - x2) * (y3 - y1)) / len;
+end
+
+function results = trimResults(results, n)
+% Cut the preallocated rows an adaptive run did not use.
+
+    for name = string(fieldnames(results))'
+        results.(name) = results.(name)(1:n);
+    end
+end
+
+function reportRangeChanges(meas)
     if meas.VChanges > 0
         fprintf("The voltmeter changed range %d time(s), ending on %g V.\n", ...
             meas.VChanges, meas.VRangeNow);
@@ -3105,7 +3465,13 @@ function log = openLog(cfg, nStates)
     log.Readings = string(fullfile(dir, "pvload_" + stamp + tag + ".csv"));
 
     fprintf("Logging to %s\n", log.Readings);
-    fprintf("  %d states, written in blocks of %d.\n", nStates, cfg.Out.Chunk);
+    if cfg.Adapt.Enabled
+        fprintf("  at most %d states, written in blocks of %d.\n", ...
+            min(cfg.Adapt.MaxPoints, nStates), cfg.Out.Chunk);
+    else
+        fprintf("  %d states, written in blocks of %d.\n", nStates, ...
+            cfg.Out.Chunk);
+    end
 end
 
 function appendPoints(log, results, rows, first)
