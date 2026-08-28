@@ -118,7 +118,7 @@ WIPER_CODES = [0 255];
 
 WRITE_CSV = true;
 OUT_DIR   = "../data/sweep_data";
-RUN_TAG   = "ILASER0p42  ";            % added to the file names. this is where the
+RUN_TAG   = "ILASER0p45";            % added to the file names. this is where the
                            % illumination goes, since nothing else records
                            % it. e.g. "cell3_lamp60"
 
@@ -1742,7 +1742,9 @@ function meas = connectMeters(cfg)
     meas = struct('Enabled', false, 'V', [], 'I', [], ...
                   'VId', "", 'IId', "", 'Faults', 0, 'Cfg', cfg.Dmm, ...
                   'VOpenSeen', NaN, 'VAdaptive', false, ...
-                  'VRangeNow', 0, 'VRanges', [], 'VChanges', 0);
+                  'VRangeNow', 0, 'VRanges', [], 'VChanges', 0, ...
+                  'IAdaptive', false, 'IRangeNow', 0, 'IRanges', [], ...
+                  'IChanges', 0);
 
     if ~cfg.Dmm.Enabled
         return
@@ -2308,6 +2310,16 @@ function [cfg, meas] = probeRanges(board, meas, cfg, plan)
     meas.VRangeNow = vRange;
     meas.VRanges   = meas.V.Ranges;
 
+    % The ammeter follows too. It was fixed on the argument that a cell's
+    % current is flat across a sweep, which is true of the cell and not of
+    % the bench: the run of 20260828_163338 climbed from 125 uA to 197 uA
+    % in fourteen minutes as the illumination drifted up, ran off the top
+    % of the range it had been pinned to, and aborted on six overflows.
+    % Nothing about that is the cell moving along its own curve.
+    meas.IAdaptive = true;
+    meas.IRangeNow = iRange;
+    meas.IRanges   = meas.I.Ranges;
+
     % The 470 kohm path draws a current fixed by Voc while Isc scales with
     % the light, so under weak illumination the OPEN state stops being an
     % open circuit. Now measured rather than estimated, and worth saying
@@ -2404,6 +2416,34 @@ function cfg = measureSettle(board, meas, cfg, plan)
 
     fprintf("  settling: %.0f ms to %.1f%% at %.0f ohm, %d readings.\n", ...
         1e3 * settled, 100 * tol, rTop, n);
+
+    % Settling and drift look identical over one window and mean opposite
+    % things. A capacitance charges and stops; illumination that is still
+    % moving never does, and reading it as capacitance is the worst
+    % possible response: it holds every state for longer, which gives the
+    % drift more time to move, which bends the curve further.
+    %
+    % Told apart by where the change sits. Settling puts it at the front
+    % of the window and leaves the tail flat; drift leaves the tail moving
+    % as much as the middle. Run 20260828_163338 was the second of those,
+    % and it was recorded as 35 uF.
+    third  = max(2, floor(sum(good) / 3));
+    values = reading(good);
+    middle = median(values(end - 2*third + 1 : end - third));
+    tail   = median(values(end - third + 1 : end));
+
+    if abs(tail - middle) > tol * abs(final)
+        warning("PVLoad:CellNotSettling", ...
+            "The reading at %.0f ohm was still moving %.2f%% per window " + ...
+            "at the end of %.1f s, so this is drift rather than settling " + ...
+            "and no capacitance is taken from it. Something is changing " + ...
+            "on its own: illumination warming up is the usual one, and a " + ...
+            "sweep run through it tilts, because every state is measured " + ...
+            "at a different moment. CELL_SETTLE stays at %g s.", ...
+            rTop, 100 * abs(tail - middle) / abs(final), times(n), ...
+            cfg.Timing.CellSettle);
+        return
+    end
 
     if measured > cfg.Timing.CLoad
         fprintf("  cell capacitance %.3g F, up from the %.3g F of leads " + ...
@@ -2530,85 +2570,78 @@ function [volts, amps, fault, meas] = readPoint(meas, cfg)
     end
 
     if meas.VAdaptive
-        [volts, meas] = adaptVoltage(meas, volts);
+        [volts, meas.VRangeNow, meas.VChanges] = followRange( ...
+            meas.V, "voltage", meas.VRanges, meas.VRangeNow, ...
+            volts, meas.VChanges);
+    end
+
+    if meas.IAdaptive
+        [amps, meas.IRangeNow, meas.IChanges] = followRange( ...
+            meas.I, "current", meas.IRanges, meas.IRangeNow, ...
+            amps, meas.IChanges);
     end
 
     fault = fault || isnan(volts) || isnan(amps);
 end
 
-function [volts, meas] = adaptVoltage(meas, volts)
-% Keeps the voltmeter on the smallest range the reading fits, one state at
-% a time.
+function [value, rangeNow, changes] = followRange(m, role, ranges, ...
+                                                 rangeNow, value, changes)
+% Keeps a meter on the smallest range its reading fits, one state at a
+% time. Both meters use it, for different reasons.
 %
-% This is worth doing because the error is not one number. A 34401A on its
-% 10 V range carries 0.0035% of reading plus 0.0005% of range, and at
-% 10 mV that second term is 50 uV against 0.35 uV from the first: on a
-% sweep whose ladder crosses three decades, the points near the bottom are
-% almost entirely range floor. A decade of range is a decade off that
-% floor, and the ladder of a dim cell spends a third of its states down
-% there.
+% On volts it is resolution. A 34401A carries 0.0035% of reading plus
+% 0.0005% of range, and at 10 mV on the 10 V range that second term is
+% 50 uV against 0.35 uV from the first, so the points near the bottom of a
+% ladder crossing three decades are almost entirely range floor.
 %
-% Two rules, and hysteresis between them so a reading sitting near a
-% boundary cannot oscillate. Widen when the reading passes 90% of range or
-% comes back as overflow. Narrow when it drops under 8% of the range below
-% the one in use, which is a decade of margin on a meter whose ranges step
-% by ten.
+% On amps it is survival. A pinned ammeter cannot follow illumination that
+% moves, and a range it has run off the top of returns overflow, which is
+% a NaN, which after five in a row aborts the run.
 %
-% Overflow is recovered rather than logged. The alternative is a NaN in
-% the CSV at exactly the state where the curve turns, since that is where
-% the voltage climbs fastest, and five of those in a row would abort a run
-% that was measuring perfectly well.
+% Two rules with hysteresis between them, so a reading parked near a
+% boundary cannot oscillate: widen at 90% of range or on overflow, narrow
+% under 8%, and narrow straight to the range that fits rather than one
+% step at a time, because the state after SHORT falls from volts to
+% millivolts in a single move.
+%
+% Overflow is recovered rather than logged. The alternative is a NaN at
+% exactly the state where the curve turns, that being where the reading
+% climbs fastest.
 
-    if isnan(volts)
-        wider = smallestAbove(meas.VRanges, meas.VRangeNow);
+    if isnan(value)
+        wider = min(ranges(ranges > rangeNow * 1.0001));
         if isempty(wider)
             return                  % already as wide as the meter goes
         end
-        meas = useVoltageRange(meas, wider);
+        setMeterRange(m, role, wider);
+        rangeNow = wider;
+        changes  = changes + 1;
         try
-            volts = meterReadOnce(meas.V);
+            value = meterReadOnce(m);
         catch
-            volts = NaN;
+            value = NaN;
         end
         return
     end
 
-    magnitude = abs(volts);
+    magnitude = abs(value);
 
-    if magnitude > 0.9 * meas.VRangeNow
-        wider = smallestAbove(meas.VRanges, meas.VRangeNow);
+    if magnitude > 0.9 * rangeNow
+        wider = min(ranges(ranges > rangeNow * 1.0001));
         if ~isempty(wider)
-            meas = useVoltageRange(meas, wider);
+            setMeterRange(m, role, wider);
+            rangeNow = wider;
+            changes  = changes + 1;
         end
         return
     end
 
-    % The smallest range that holds this reading with a tenth to spare,
-    % which may be several decades down: the state after SHORT drops from
-    % volts to millivolts in one step, and stepping one range at a time
-    % would spend the whole bottom of the ladder catching up.
-    target = min(meas.VRanges(meas.VRanges >= magnitude / 0.9));
-    if isempty(target)
-        return
+    target = min(ranges(ranges >= magnitude / 0.9));
+    if ~isempty(target) && target < rangeNow && magnitude < 0.08 * rangeNow
+        setMeterRange(m, role, target);
+        rangeNow = target;
+        changes  = changes + 1;
     end
-
-    % Narrowing is held off until the reading is under 8% of the range in
-    % use, while widening happens at 90%. The gap between those two is what
-    % stops a reading parked near a boundary from changing range at every
-    % state for the rest of the sweep.
-    if target < meas.VRangeNow && magnitude < 0.08 * meas.VRangeNow
-        meas = useVoltageRange(meas, target);
-    end
-end
-
-function meas = useVoltageRange(meas, range)
-    setMeterRange(meas.V, "voltage", range);
-    meas.VRangeNow = range;
-    meas.VChanges  = meas.VChanges + 1;
-end
-
-function out = smallestAbove(ranges, value)
-    out = min(ranges(ranges > value * 1.0001));
 end
 
 function setMeterRange(m, role, range)
@@ -2935,9 +2968,15 @@ function results = runSweep(board, meas, plan, cfg, log)
     end
 
     fprintf("\n%d read fault(s).\n", faults);
-    if meas.VAdaptive && meas.VChanges > 0
+    if meas.VChanges > 0
         fprintf("The voltmeter changed range %d time(s), ending on %g V.\n", ...
             meas.VChanges, meas.VRangeNow);
+    end
+    if meas.IChanges > 0
+        fprintf("The ammeter changed range %d time(s), ending on %g mA. " + ...
+            "A run that\nkeeps doing that is illumination moving, not a " + ...
+            "cell moving along its curve.\n", ...
+            meas.IChanges, 1e3 * meas.IRangeNow);
     end
 end
 
