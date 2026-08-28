@@ -69,19 +69,15 @@ DMM_R_ADDRESS = "GPIB0::1::INSTR";  % the one meter RUN "ohms" uses, on
 % run the sweep, change the lamp, run it again; each run writes its own
 % timestamped CSV and RUN_TAG is how you tell them apart afterwards.
 
-ISC_FULL = 100e-6;         % A, short-circuit current under that light.
-                           % measured 64.8 uA at 0.42 A of laser drive,
-                           % run 20260828_145929. this is that with room
-                           % to climb, and it puts the 196 on its 300 uA
-                           % range instead of the 30 mA one, where the
-                           % cell was living in the bottom 0.2%.
-VOC_FULL = 4;              % V, open-circuit voltage under that light. the
-                           % OPEN state read 3.384 V on the same run and
-                           % that is a floor rather than Voc, since 470
-                           % kohm was still drawing 11% of Isc. anything
-                           % from 1 to 10 selects the same 10 V range on
-                           % the 34401A, so the exact figure is not
-                           % load bearing.
+ISC_FULL = 0;              % A, short-circuit current under that light.
+VOC_FULL = 0;              % V, open-circuit voltage under that light.
+                           % zero for both, which is the normal setting,
+                           % means the sweep measures them itself before it
+                           % starts and sizes the meters from what it
+                           % found. see probeRanges. a number here pins the
+                           % range instead, which is only worth doing when
+                           % the light will change mid-run and you want one
+                           % range across the family.
 
 CELL_AREA_CM2 = 0;         % cm2 of illuminated cell, or 0 if not known.
                            % decides whether the figure carries current or
@@ -1012,6 +1008,7 @@ function results = runSweepAll(cfg)
     % energised behind nothing.
     try
         meas = connectMeters(cfg);
+        probeRanges(board, meas, cfg);
         log  = openLog(cfg, numel(plan));
     catch openError
         quietly(@() enterSafeState(board));
@@ -1509,18 +1506,15 @@ function reportPlan(cfg, plan)
     fprintf("Sweep plan: %d load states, %g ohm to %g ohm.\n", ...
         numel(plan), plan(1).Resistance, plan(end).Resistance);
 
-    % The 470 kohm path draws a fixed current at the OPEN point while Isc
-    % scales with light, so under weak illumination that point stops being
-    % an open-circuit measurement. Nothing here can see the lamp, so this
-    % is checked against ISC_FULL and is only as good as that number.
-    openFraction = (cfg.Cell.VocFull / cfg.ROpenPath) / cfg.Cell.IscFull;
-    fprintf("Cell at the light you will run it under: Isc about %g mA, " + ...
-        "Voc about %g V.\n", 1e3 * cfg.Cell.IscFull, cfg.Cell.VocFull);
-    if openFraction > 0.05
-        warning("PVLoad:OpenPointWeak", ...
-            "The 470 kohm path draws %.1f%% of ISC_FULL. The OPEN point " + ...
-            "is not a Voc measurement at this illumination.", ...
-            100 * openFraction);
+    % Whether the cell is described here or found at the start of the run.
+    % The OPEN state check that used to live here has moved to probeRanges,
+    % where it is made against a measurement instead of an estimate.
+    if cfg.Cell.IscFull > 0 || cfg.Cell.VocFull > 0
+        fprintf("Cell as configured: Isc %g mA, Voc %g V.\n", ...
+            1e3 * cfg.Cell.IscFull, cfg.Cell.VocFull);
+    else
+        fprintf("Cell: measured at the start of the run and the meters " + ...
+            "sized from it.\n");
     end
 
     if cfg.Dmm.Enabled
@@ -2009,10 +2003,11 @@ function sent = ddcConfigure(m, role, range)
     D  = m.Ddc;
     fn = functionFor(D, role);
 
-    % Ohms is the only place autorange is used. A sweep of five decades has
-    % no fixed range that holds it, and unlike the ammeter in a sweep there
-    % is no cell being loaded while the meter hunts.
-    if role == "ohms" && range <= 0
+    % A range of zero means autorange. RUN "ohms" uses it for a sweep of
+    % five decades that no fixed range holds, and the probe that sizes the
+    % sweep's own ranges uses it for the two readings it takes before the
+    % range is known.
+    if range <= 0
         command = fn + D.AutoRange;
     else
         command = fn + sprintf(D.Range, ...
@@ -2038,7 +2033,7 @@ function scpiConfigure(m, role, range)
 
     D    = m.Ddc;
     node = functionFor(D, role);
-    auto = role == "ohms" && range <= 0;
+    auto = range <= 0;
 
     if auto
         select = "CONF:" + node;
@@ -2176,7 +2171,7 @@ function range = pickCurrentRange(iscExpected, cfg)
         return
     end
     if isnan(iscExpected) || iscExpected <= 0
-        range = max(I.Ranges);
+        range = 0;              % autorange, nothing is known yet
         return
     end
 
@@ -2188,10 +2183,14 @@ function range = pickCurrentRange(iscExpected, cfg)
     end
 end
 
-function range = pickVoltageRange(cfg)
-% Sizing the range from VOC_FULL rather than naming a number keeps one
+function range = pickVoltageRange(cfg, vocSeen)
+% Sizing the range from a voltage rather than naming a number keeps one
 % configuration working on either meter, whose ranges do not line up: a
 % 9 V Voc lands on 30 V on a 196 and 10 V on a 34401A.
+%
+% The voltage is whatever the caller knows. VOC_FULL when someone pinned
+% it, what the OPEN state actually read when the probe measured it, and
+% nothing at all before either, which asks for autorange.
 
     V = cfg.Dmm.V;
 
@@ -2200,11 +2199,132 @@ function range = pickVoltageRange(cfg)
         return
     end
 
-    fits = V.Ranges(V.Ranges >= cfg.Cell.VocFull);
+    if nargin < 2
+        vocSeen = cfg.Cell.VocFull;
+    end
+    if isnan(vocSeen) || vocSeen <= 0
+        range = 0;              % autorange, nothing is known yet
+        return
+    end
+
+    % No headroom, unlike the ammeter. The OPEN state is the highest
+    % voltage the sweep reaches, so the measurement is already the maximum,
+    % and rounding a 9 V cell up past the 10 V range would cost the
+    % 34401A's high impedance input, which exists only below that.
+    fits = V.Ranges(V.Ranges >= vocSeen);
     if isempty(fits)
         range = max(V.Ranges);
     else
         range = min(fits);
+    end
+end
+
+function probeRanges(board, meas, cfg)
+% Measures the two numbers the meters have to be sized from, instead of
+% being told them.
+%
+% Both are endpoints the sweep visits anyway. The largest voltage of the
+% run is the OPEN state, where the cell sits behind 470 kohm, and the
+% largest current is the SHORT state, where it sits behind a reed contact.
+% Nothing else in the sweep exceeds either, because every other state is
+% one of those two with resistance added. So two readings on autorange
+% bound the whole run, and the fixed ranges that follow are sized from the
+% cell in front of the meters rather than from a number typed in weeks
+% earlier at an illumination nobody recorded.
+%
+% This is what ISC_FULL and VOC_FULL used to be for. They remain, pinning
+% the range when a family of runs at different light should share one, and
+% a pinned range skips its half of the probe.
+%
+% Cost is two states and two reconfigurations, a few seconds against a
+% run of minutes. Autorange is what makes it possible and is also why it
+% is not used for the sweep itself: the hunt costs conversions at every
+% state that changes decade, which is the whole point of settling the
+% range once.
+
+    if ~meas.Enabled
+        return
+    end
+
+    wantV = cfg.Dmm.V.Range <= 0 && cfg.Cell.VocFull <= 0;
+    wantI = cfg.Dmm.I.Range <= 0 && cfg.Cell.IscFull <= 0;
+
+    if ~wantV && ~wantI
+        return
+    end
+
+    fprintf("\nSizing the meters from the cell:\n");
+
+    voc = cfg.Cell.VocFull;
+    isc = cfg.Cell.IscFull;
+
+    if wantV
+        enterSafeState(board);
+        pause(settleFor(probeState("OPEN"), "", cfg));
+        voc = probeRead(meas.V, "voltage", "OPEN");
+        fprintf("  OPEN  %9.4f V\n", voc);
+    end
+
+    if wantI
+        setMode(board, "SHORT");
+        setWipers(board, 0, 0);
+        pause(settleFor(probeState("SHORT"), "OPEN", cfg));
+        isc = probeRead(meas.I, "current", "SHORT");
+        fprintf("  SHORT %9.4f mA\n", 1e3 * isc);
+    end
+
+    % Back to OPEN before anything else happens, which is the same rule the
+    % sweep runs under: a closed K2 across a lit cell is not a state to
+    % leave the board in while the meters are being reconfigured.
+    enterSafeState(board);
+
+    vRange = pickVoltageRange(cfg, voc);
+    iRange = pickCurrentRange(isc, cfg);
+
+    configureMeter(meas.V, "voltage", vRange);
+    configureMeter(meas.I, "current", iRange);
+
+    fprintf("  ranges %g V and %g mA, 20%% above what the cell showed.\n", ...
+        vRange, 1e3 * iRange);
+
+    % The 470 kohm path draws a current fixed by Voc while Isc scales with
+    % the light, so under weak illumination the OPEN state stops being an
+    % open circuit. Now measured rather than estimated, and worth saying
+    % before an hour of sweeping rather than after.
+    fraction = (voc / cfg.ROpenPath) / isc;
+    if fraction > 0.05
+        warning("PVLoad:OpenPointWeak", ...
+            "The 470 kohm path draws %.1f%% of the short-circuit current " + ...
+            "at this illumination, so the OPEN state is a floor under Voc " + ...
+            "rather than Voc.", 100 * fraction);
+    end
+end
+
+function state = probeState(mode)
+% The settle a state of this mode gets, without going through the plan.
+    state = struct('Mode', string(mode), 'Code1', 0, 'Code2', 0, ...
+                   'Resistance', 0);
+end
+
+function value = probeRead(m, role, mode)
+% One reading, and it has to arrive. A probe that quietly returned NaN
+% would size the range from nothing and the whole run would inherit it.
+
+    try
+        value = meterReadOnce(m);
+    catch readError
+        error("PVLoad:ProbeFailed", ...
+            "The %s meter (%s) could not be read at the %s state while " + ...
+            "sizing its range: %s", role, m.Label, mode, readError.message);
+    end
+
+    value = abs(value);
+
+    if isnan(value) || value <= 0
+        error("PVLoad:ProbeFailed", ...
+            "The %s meter (%s) returned %g at the %s state while sizing " + ...
+            "its range. On autorange that is an open lead, a dark cell, " + ...
+            "or a meter on the wrong function.", role, m.Label, value, mode);
     end
 end
 
