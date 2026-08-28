@@ -492,10 +492,10 @@ function runRamp(cfg)
 % checked.
 %
 % The printed ohms are the resistance model, not a measurement. R_WIPER is
-% the datasheet worst case of 200 ohm and R_AB is +/-20%, so a meter that
-% disagrees at the low end is the model being pessimistic rather than the
-% board being wrong. That reading is worth keeping: it is what R_WIPER
-% should be set to.
+% the 155 ohm measured on board 2 and R_AB is +/-20%, so a meter that
+% disagrees at the low end is the model's tolerance rather than the board
+% being wrong. A disagreement larger than that on a different board is
+% worth keeping: it is what R_WIPER should be set to for that one.
 
     plan  = buildSweepPlan(cfg);
     board = connectBoard(cfg);
@@ -975,8 +975,17 @@ function results = runSweepAll(cfg)
     board = connectBoard(cfg);
     fprintf("Board connected.\n");
 
-    meas = connectMeters(cfg);
-    log  = openLog(cfg, numel(plan));
+    % runExperiment's guard is built from the board and the meters
+    % together, so it does not exist while the meters are coming up. A
+    % meter that will not open would otherwise leave the board
+    % energised behind nothing.
+    try
+        meas = connectMeters(cfg);
+        log  = openLog(cfg, numel(plan));
+    catch openError
+        quietly(@() enterSafeState(board));
+        rethrow(openError);
+    end
 
     results = runExperiment(board, meas, plan, cfg, log);
 
