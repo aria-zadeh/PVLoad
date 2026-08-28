@@ -23,7 +23,7 @@ clc;
 %   "meters"  both sweep meters only
 %   "sweep"   the full experiment, written to CSV
 
-RUN = "meters";  
+RUN = "sweep";  
 
 
 % Ports and addresses, and what each one needs on the bench. Wiring and the
@@ -156,8 +156,8 @@ R_OPEN_PATH  = 470e3;      % ohms, R1
 % rather than electrometers, so neither has zero check and both read
 % current across a shunt:
 %
-%   "196"     Keithley 196 system DMM. Amps start at 3 mA, and there is no
-%             integration time to set.
+%   "196"     Keithley 196 system DMM. Amps start at 300 uA, table 3-9,
+%             and there is no integration time to set.
 %   "34401A"  Agilent 34401A. Amps start at 10 mA. What it adds is an
 %             integration time and a switchable high impedance input, which
 %             is what makes it the better of the two as a voltmeter.
