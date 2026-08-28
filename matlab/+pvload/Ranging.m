@@ -31,27 +31,10 @@ end
 
 
 function [cfg, meas] = probeRanges(board, meas, cfg, plan)
-% Measures the two numbers the meters have to be sized from, instead of
-% being told them.
+% Measures the two numbers the meters are sized from instead of being told
+% them. A pinned ISC_FULL or VOC_FULL skips its half of the probe.
 %
-% Both are endpoints the sweep visits anyway. The largest voltage of the
-% run is the OPEN state, where the cell sits behind 470 kohm, and the
-% largest current is the SHORT state, where it sits behind a reed contact.
-% Nothing else in the sweep exceeds either, because every other state is
-% one of those two with resistance added. So two readings on autorange
-% bound the whole run, and the fixed ranges that follow are sized from the
-% cell in front of the meters rather than from a number typed in weeks
-% earlier at an illumination nobody recorded.
-%
-% This is what ISC_FULL and VOC_FULL used to be for. They remain, pinning
-% the range when a family of runs at different light should share one, and
-% a pinned range skips its half of the probe.
-%
-% Cost is two states and two reconfigurations, a few seconds against a
-% run of minutes. Autorange is what makes it possible and is also why it
-% is not used for the sweep itself: the hunt costs conversions at every
-% state that changes decade, which is the whole point of settling the
-% range once.
+% Costs two states and two reconfigurations against a run of minutes.
 
     if ~meas.Enabled
         return
@@ -117,23 +100,14 @@ function [cfg, meas] = probeRanges(board, meas, cfg, plan)
 end
 
 function cfg = measureSettle(board, meas, cfg, plan)
-% Watches the cell settle and sets its capacitance from what that takes,
-% instead of leaving C_LOAD to stand for a junction nobody characterised.
+% Takes the cell's capacitance from how long it actually settles, rather
+% than leaving C_LOAD to stand for an uncharacterised junction. Measured at
+% the top of the ladder, settling being RC and R largest there; the settle
+% formula scales it to every other state.
 %
-% Done at the slowest state there is, the top of the ladder, because
-% settling is RC and R is largest there. Reading as fast as the ammeter
-% will go and finding when the readings stop moving gives a time; dividing
-% it by the tau count and that resistance gives a capacitance, which the
-% existing settle formula then scales correctly for every other state. One
-% measurement at the worst case, not a number repeated blindly at all of
-% them.
-%
-% This matters because guessing low does not add noise, it tilts the
-% curve. An under-settled point reads a current still falling toward its
-% value, the error grows with R, and R is what the sweep is ordered by, so
-% the whole plateau leans. That is exactly the shape the first cell run
-% showed: current climbing 5.7% from the bottom of the ladder to the top,
-% which was read as the cell doing something interesting.
+% Guessing low does not add noise, it tilts the curve: an under-settled
+% point reads a current still falling, the error grows with R, and R is
+% what the sweep is ordered by. The first cell run leaned 5.7% that way.
 
     ladder = [plan.Mode] ~= "SHORT" & [plan.Mode] ~= "OPEN";
     [rTop, at] = max([plan.Resistance] .* ladder);
@@ -195,15 +169,10 @@ function cfg = measureSettle(board, meas, cfg, plan)
         1e3 * settled, 100 * tol, rTop, n);
 
     % Settling and drift look identical over one window and mean opposite
-    % things. A capacitance charges and stops; illumination that is still
-    % moving never does, and reading it as capacitance is the worst
-    % possible response: it holds every state for longer, which gives the
-    % drift more time to move, which bends the curve further.
-    %
-    % Told apart by where the change sits. Settling puts it at the front
-    % of the window and leaves the tail flat; drift leaves the tail moving
-    % as much as the middle. Run 20260828_163338 was the second of those,
-    % and it was recorded as 35 uF.
+    % things, and reading drift as capacitance is the worst answer: it
+    % holds every state longer, giving the drift more time to move. Told
+    % apart by where the change sits -- settling leaves the tail flat.
+    % Run 20260828_163338 was drift, and it recorded as 35 uF.
     third  = max(2, floor(sum(good) / 3));
     values = reading(good);
     middle = median(values(end - 2*third + 1 : end - third));
@@ -240,21 +209,12 @@ function cfg = measureSettle(board, meas, cfg, plan)
 end
 
 function reportKnee(plan, voc, isc)
-% Says whether the knee is inside the ladder before the sweep spends
-% minutes finding out.
+% Whether the knee is inside the ladder, before the sweep spends minutes
+% finding out. The cell sits where its curve crosses a line of slope 1/R,
+% so the resistance at maximum power is Vmp over Imp; 0.8 of Voc over 0.9
+% of Isc is rough and rough answers the only question here.
 %
-% The load sets the operating point: the cell sits where its curve crosses
-% a line of slope 1/R, so the resistance that lands on the maximum power
-% point is Vmp over Imp. Taking the usual 0.8 of Voc and 0.9 of Isc is
-% rough, and rough is enough for the only question here, which is whether
-% that resistance is inside the range of a board whose ladder spans two
-% decades.
-%
-% This prints and warns and does nothing else. It cannot skip a state or
-% choose one, which is the same rule the resistance model has always run
-% under: R_AB is plus or minus 20%, the wiper is measured on one board,
-% and neither is allowed to decide what gets measured. It is allowed to
-% decide what the operator is told before the run.
+% Prints and warns and nothing else. It may not skip or choose a state.
 
     ladder = [plan.Mode] ~= "SHORT" & [plan.Mode] ~= "OPEN";
     lo     = min([plan(ladder).Resistance]);
@@ -312,14 +272,8 @@ function value = probeRead(m, role, mode)
 end
 
 function range = pickCurrentRange(iscExpected, cfg)
-% Settled once per run, before the first state, and never touched again.
-% A range change costs a fresh configuration, and 769 of those would be
-% absurd.
-%
-% Autorange exists and is not used. A range hunt inside a settled point
-% spends conversions on the wrong range, and the answer it would arrive at
-% is already known from ISC_FULL. That number is the operator's estimate at
-% the illumination they set by hand; nothing here can see the lamp.
+% Settled once per run. Autorange exists and is not used for the sweep: a
+% hunt inside a settled point spends conversions on the wrong range.
 
     I = cfg.Dmm.I;
 
@@ -341,13 +295,11 @@ function range = pickCurrentRange(iscExpected, cfg)
 end
 
 function range = pickVoltageRange(cfg, vocSeen)
-% Sizing the range from a voltage rather than naming a number keeps one
-% configuration working on either meter, whose ranges do not line up: a
-% 9 V Voc lands on 30 V on a 196 and 10 V on a 34401A.
-%
-% The voltage is whatever the caller knows. VOC_FULL when someone pinned
-% it, what the OPEN state actually read when the probe measured it, and
-% nothing at all before either, which asks for autorange.
+% Sizing from a voltage rather than naming a number keeps one setting
+% working on either meter, whose ranges do not line up: a 9 V Voc lands on
+% 30 V on a 196 and 10 V on a 34401A. The voltage is whatever the caller
+% knows -- VOC_FULL, the measured OPEN reading, or nothing, which asks for
+% autorange.
 
     V = cfg.Dmm.V;
 

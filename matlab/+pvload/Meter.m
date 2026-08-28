@@ -18,14 +18,12 @@ methods (Static)
 function meas = connect(dmm, vRange, iRange)
 % Both sweep meters, opened, identified and configured. Every port opened
 % here is closed again unless all of them come up: the caller's guard is
-% built from the returned struct, so it does not exist while this runs, and
-% a meter that opens and then fails to identify would otherwise be left to
-% whenever MATLAB collects it. Closing on the way out makes the next run's
-% open a fresh session rather than a race against the last one.
+% built from the returned struct, so it does not exist yet, and closing on
+% the way out makes the next run's open a fresh session.
 %
-% The ranges are the caller's decision. Settled once here rather than per
-% state: a range change costs a fresh configuration, and on a Keithley each
-% one leaves another triggered reading behind.
+% Ranges are the caller's decision, settled once rather than per state: a
+% change costs a reconfiguration, and on a Keithley each one leaves another
+% triggered reading behind.
 
     meas = struct('Enabled', false, 'V', [], 'I', [], ...
                   'VId', "", 'IId', "", ...
@@ -112,14 +110,11 @@ function [volts, amps, fault, meas] = readPoint(meas, parallel)
             amps, meas.IChanges);
     end
 
-    % An ammeter that changed range inside this point was on the wrong
-    % range while the voltmeter converted, and an overloaded 196 clamps
-    % over a volt of burden across its terminals, in series with the cell
-    % and so into the voltage reading. The recovered current is then real
-    % and the voltage is not, and their product is a power the cell never
-    % made: every run's first state after OPEN read about 1.5 V high this
-    % way, and at 0.7 A of laser drive the fake point outbid the true
-    % maximum. Take the pair again now both meters sit on ranges that fit.
+    % An ammeter that re-ranged inside this point was on the wrong range
+    % while the voltmeter converted, and an overloaded 196 clamps over a
+    % volt of burden in series with the cell. The current is then real and
+    % the voltage is not: every run's first state after OPEN read 1.5 V
+    % high, and the fake power outbid the true maximum. Take both again.
     if meas.IChanges > iChangesBefore && ~isnan(amps)
         [volts, amps, reread] = readPair(meas, parallel, volts, amps);
         fault = fault || reread;
@@ -135,14 +130,11 @@ end
 % ---- ranging -----------------------------------------------------------
 
 function meas = setRanges(meas, vRange, iRange)
-% Configure both meters and let them follow the reading from here on.
-%
-% The voltmeter follows for resolution: the 34401A's 0.0005% of range is
-% 50 uV at 10 mV on the 10 V range against 0.35 uV of reading error, so the
-% bottom of a ladder crossing three decades would be almost all range
-% floor. The ammeter follows for survival: a pinned range cannot track
-% illumination that drifts, and run 20260828_163338 climbed from 125 uA to
-% 197 uA in fourteen minutes and aborted on six overflows.
+% Configure both meters and let them follow the reading from here on. The
+% voltmeter follows for resolution, the 34401A's 0.0005% of range being
+% 50 uV at 10 mV on the 10 V range; the ammeter for survival, run
+% 20260828_163338 having drifted 125 uA to 197 uA and aborted on
+% overflows.
 
     configureMeter(meas.V, "voltage", vRange);
     configureMeter(meas.I, "current", iRange);
@@ -245,18 +237,12 @@ function scpiConfigure(m, role, range)
 end
 
 function m = openMeter(spec, role)
-% The one place a transport is chosen. On a 196 there is only the one: the
-% rear panel carries an IEEE-488 connector and nothing else. The 34401A
-% also has an RS-232 port, which VISA reaches as an ASRL resource, so an
-% address is not necessarily GPIB any more.
+% The one place a transport is chosen. An address is not necessarily GPIB:
+% the 34401A also has RS-232, which VISA reaches as an ASRL resource.
 %
-% The open port and its profile leave here together. Everything below takes
-% that pair rather than a port and a bench-wide model, which is what lets
-% one sweep run two different instruments.
-%
-% The terminator comes from the profile because the dialects disagree about
-% it. A Keithley reply ends CR LF; a 34401A ends LF alone, and waiting on a
-% pair that never arrives is a timeout on every read.
+% The terminator comes from the profile because the dialects disagree. A
+% Keithley reply ends CR LF, a 34401A LF alone, and waiting on a pair that
+% never arrives is a timeout on every read.
 
     m = spec;
     D = spec.Ddc;
@@ -289,30 +275,20 @@ function m = openMeter(spec, role)
 end
 
 function primeDdc(m)
-% visadev sends *IDN? to whatever it opens and offers no way to turn that
-% off (MathWorks support, MATLAB Answers 2118301). The 196 predates SCPI:
-% none of those characters execute without a trailing X, so the fragment
-% sits in its parser and the next real command is concatenated onto it.
-% The X that command ends with then executes the combined garbage. That is
-% the whole family of session-open faults this bench measured: the first
-% command that vanishes, the IDDCO that latches with no invalid command
-% ever sent, and both surfacing an exchange or two late. The error word is
-% therefore unreliable near an open, which is why setup verification reads
-% the machine word instead (ddcVerifySetup).
+% visadev sends *IDN? to whatever it opens and cannot be told not to
+% (MATLAB Answers 2118301). The 196 executes nothing without a trailing X,
+% so that fragment sits in its parser and the next real command is
+% concatenated onto it. Every session-open fault this bench chased is that:
+% a vanished first command, a latched IDDCO nobody caused, both surfacing
+% an exchange late. So the error word is not trusted near an open and
+% ddcVerifySetup reads the machine word instead.
 %
-% The bare X below is the terminator visadev never sent. It executes the
-% stranded fragment at a time of our choosing, as the only command in the
-% parser, and whatever that latches is drained here before anything is
-% asked in earnest.
-%
-% T5 must land before the first question because power-on is T0,
-% continuous on talk, table 3-8: being addressed to talk is itself a
-% trigger, so every read manufactures a fresh reading and a query comes
-% back "NDCI-00.00079E-3" instead of its answer. A drain that keeps
-% answering with readings or nothing means the T5 was itself swallowed, so
-% the attempt loop sends it again. One write per attempt: two writes in
-% quick succession into a fresh session get mangled into one string,
-% measured here as an IDDCO with every individual command valid.
+% The bare X is the terminator visadev never sent, executing the fragment
+% when we choose. T5 must land before the first question: power-on is T0,
+% continuous on talk, so being addressed to talk is itself a trigger and
+% every query answers with a reading. A drain that keeps returning readings
+% means the T5 was swallowed, hence the retry. One write per attempt: two
+% in quick succession into a fresh session get mangled into one string.
 
     pause(0.5);
     ddcTell(m.Port, "");
@@ -369,16 +345,11 @@ function text = availableResources()
 end
 
 function word = identifyMeter(m, role)
-% The 196 has no *IDN?. Its U0 query returns the machine status word, which
-% opens with the model number and then spells out the front panel setup, so
-% one query identifies the instrument and reports its state. The 34401A
-% does have *IDN?, whose reply is maker, model, serial and firmware, so the
-% model sits in the middle rather than at the front.
-%
-% Either way the model check is what catches a DMM_*_MODEL naming one meter
-% while the address reaches the other. That matters more now the two need
-% not be the same instrument: the wrong profile would otherwise show up as
-% a range number meaning something different from what was intended.
+% The 196 has no *IDN?: U0 returns the machine word, which starts with the
+% model. The 34401A's *IDN? puts the model in the middle instead, hence the
+% two matching rules. This is what catches a DMM_*_MODEL naming one meter
+% while the address reaches the other, which would otherwise show up only
+% as a range number meaning something else.
 
     D = m.Ddc;
 
@@ -399,14 +370,12 @@ function word = identifyMeter(m, role)
 end
 
 function configureMeter(m, role, range)
-% Function and range travel together in both dialects, for the same reason
-% in each: an R number means a different range in every function, and CONF
-% takes the two as one command. Then the setup is checked, each dialect its
-% own way: the 34401A by draining its error queue, the 196 by reading the
-% machine status word back and comparing digits, because visadev poisons
-% the 196's error word at every open (see primeDdc) and a latched phantom
-% bit can surface commands later. The machine word is the setup; the error
-% word is only history.
+% Function and range travel together in both dialects: an R number means a
+% different range in every function, and CONF takes both as one command.
+% The setup is then checked each dialect's own way -- the 34401A by
+% draining its error queue, the 196 against the machine word, because
+% visadev poisons its error word at every open (see primeDdc). The machine
+% word is the setup; the error word is only history.
 
     if m.Ddc.Dialect == "scpi"
         scpiConfigure(m, role, range);
@@ -467,15 +436,10 @@ function sent = ddcConfigure(m, role, range)
 end
 
 function assertMeterHappy(m, role)
-% Whatever a command the meter did not understand cost, it is cheaper to
-% find here than in the CSV. SYST:ERR? pops one entry off a queue and a
-% clean one reads +0. SCPI only; the 196's setup is checked against the
-% machine word in ddcVerifySetup, because its error word is not
-% trustworthy near a session open.
-%
-% The queue is drained rather than sampled. A setup that sends nine
-% commands can have several rejected, and popping one entry per run turns
-% bringing up a profile into one round trip per mistake.
+% Cheaper to find a rejected command here than in the CSV. SCPI only; the
+% 196 is checked against the machine word instead. The queue is drained
+% rather than sampled, so a setup with several rejects reports them all in
+% one run.
 
     faults = scpiErrorQueue(m);
     if isempty(faults)
@@ -487,16 +451,12 @@ function assertMeterHappy(m, role)
 end
 
 function ddcVerifySetup(m, role, sent)
-% The machine word is read back and every setting the setup string carried
-% is compared digit by digit, positions from the profile StatusMap. This
-% checks what the meter is actually in, not what it complained about,
-% which matters because a phantom IDDCO from the session open (see
-% primeDdc) can surface in the error word commands after the fact. A
-% setting the meter refused shows up here as a digit that did not move.
-%
-% R0, the ohms autorange, is skipped: under autorange the word reports
-% whichever range the meter has chosen, which is information rather than
-% disagreement.
+% Every setting the setup string carried, compared digit by digit against
+% the machine word, positions from the profile StatusMap. This checks what
+% the meter is in rather than what it complained about, because a phantom
+% IDDCO from the session open can surface commands later. R0, the ohms
+% autorange, is skipped: the word then reports whichever range the meter
+% chose, which is information rather than disagreement.
 
     word  = ddcAskStatus(m, m.Ddc.Machine);
     state = extractAfter(word, m.Ddc.IdPrefix);
@@ -559,27 +519,14 @@ end
 
 function [value, rangeNow, changes] = followRange(m, role, ranges, ...
                                                  rangeNow, value, changes)
-% Keeps a meter on the smallest range its reading fits, one state at a
-% time. Both meters use it, for different reasons.
+% Keeps a meter on the smallest range its reading fits.
 %
-% On volts it is resolution. A 34401A carries 0.0035% of reading plus
-% 0.0005% of range, and at 10 mV on the 10 V range that second term is
-% 50 uV against 0.35 uV from the first, so the points near the bottom of a
-% ladder crossing three decades are almost entirely range floor.
-%
-% On amps it is survival. A pinned ammeter cannot follow illumination that
-% moves, and a range it has run off the top of returns overflow, which is
-% a NaN, which after five in a row aborts the run.
-%
-% Two rules with hysteresis between them, so a reading parked near a
-% boundary cannot oscillate: widen at 90% of range or on overflow, narrow
-% under 8%, and narrow straight to the range that fits rather than one
-% step at a time, because the state after SHORT falls from volts to
-% millivolts in a single move.
-%
-% Overflow is recovered rather than logged. The alternative is a NaN at
-% exactly the state where the curve turns, that being where the reading
-% climbs fastest.
+% Widen at 90% of range or on overflow, narrow under 8%: the gap between
+% the two thresholds is the hysteresis that stops a reading parked on a
+% boundary re-ranging every state. Narrowing jumps straight to the range
+% that fits, because the state after SHORT falls from volts to millivolts
+% in one move. Overflow is recovered rather than logged, since it lands at
+% exactly the state where the curve turns.
 
     % Widened one range at a time until the reading fits or the meter has
     % nothing wider, because an overflow says nothing about how far over
@@ -688,21 +635,15 @@ function value = meterDecode(m, reply)
 end
 
 function value = ddcDecode(reply, prefixes)
-% A reading carries its own status: N for normal or O for overflow, then
-% three letters for the function, then the mantissa and exponent. An
-% overflow comes back as NaN so the caller counts it as a fault, because it
-% is a full-scale number that would otherwise sit in the CSV looking like a
-% measurement.
+% N for normal or O for overflow, three letters of function tag, then the
+% number. Overflow returns NaN so the caller counts it as a fault instead
+% of writing full scale to the CSV.
 %
-% The prefix is required rather than optional. G0 in the setup string asks
-% for it, so a reply arriving without one is not a reading this code asked
-% for, and a status word left unread would otherwise parse as a perfectly
-% plausible number.
-%
-% The tags come from the profile because they belong to the instrument, not
-% to the dialect. The 196 sends DCI for amps, figure 3-6; a decoder holding
-% another meter's list accepts the volts reading and rejects the current
-% one, which is the worst of both.
+% The prefix is required, not optional: G0 asks for it, so a reply without
+% one is not a reading we asked for, and an undemanded status word parses
+% as a plausible number. Tags come from the profile because they belong to
+% the instrument -- the 196 sends DCI for amps, and a decoder holding
+% another Keithley's list NaNs every current reading.
 %
 % Takes strings, not a port, so captured replies can drive it offline.
 
@@ -718,14 +659,9 @@ function value = ddcDecode(reply, prefixes)
 end
 
 function value = scpiDecode(reply, overflow)
-% A 34401A reading is the number and nothing else, so unlike the 196
-% decoder there is no prefix to demand and anything unparseable has to
-% carry the whole check. str2double gives NaN for that, which is what the
-% caller counts as a fault.
-%
-% Overflow is not a status letter here either: the meter returns 9.9E37 for
-% a reading past full scale, which is a perfectly valid number and would
-% otherwise land in the CSV as one.
+% A 34401A reading is the bare number, so there is no prefix to demand and
+% str2double's NaN carries the whole check. Overflow is not a status letter
+% either: 9.9E37 is a valid number that would otherwise land in the CSV.
 %
 % Takes a string, not a port, so captured replies can drive it offline.
 
@@ -765,15 +701,10 @@ function reply = meterAsk(m, command)
 end
 
 function word = ddcAskStatus(m, command)
-% A status query whose answer must be the status word, not a reading. The
-% flush in ddcAsk clears the host buffer, but a stale reading can be
-% sitting in the meter itself: every command string ends in an X, under T5
-% every X is a trigger, and the reading that leaves is handed out on the
-% next talk even when a query has been answered since. Seen on the bench as
-% U1 answering "NDCI-00.00084E-3" after a clean identify. A reading is
-% recognisable, N or O and then a function tag, so up to two of them are
-% read past rather than mistaken for the word; anything else is returned
-% for the caller to judge.
+% The answer must be the status word, not a reading. ddcAsk's flush clears
+% the host buffer but not a reading still inside the meter, which is handed
+% out on the next talk. A reading is recognisable -- N or O then a function
+% tag -- so up to two are read past rather than mistaken for the word.
 
     word = ddcAsk(m, command);
     for k = 1:2
@@ -794,22 +725,12 @@ function ddcTell(port, command)
 end
 
 function reply = ddcAsk(m, command)
-% Flushed first, because under T5 every command string this code sends ends
-% in an X and every X is a trigger. A setup string therefore leaves a
-% reading in the meter's output that nobody asked for, and the next query
-% reads that instead of its own answer. It is one behind from then on, and
-% it fails in the worst way: a status word query comes back with something
-% that parses as a plausible number.
-%
-% This is what U1 answering "NDCI-00.00009E-3" was, on the bench, at the
-% second configuration of the ammeter. The first configuration's X had
-% triggered a conversion and nothing had collected it.
-%
-% Discarding here rather than counting X's is deliberate. Whether a given
-% command string produces a reading depends on the trigger mode it is
-% itself setting up, so the count is not knowable from this side; what is
-% knowable is that a query's answer is the next thing the meter sends after
-% the query goes out.
+% Flushed first: under T5 every command string ends in an X and every X is
+% a trigger, so a setup string leaves an uncollected reading behind and the
+% next query reads that instead of its answer. Seen on the bench as U1
+% answering "NDCI-00.00009E-3". Discarding beats counting X's, because
+% whether a string produces a reading depends on the trigger mode it is
+% itself setting up.
 
     flush(m.Port, "input");
     ddcTell(m.Port, command);

@@ -58,20 +58,14 @@ methods (Static)
     end
 
     function runRamp(cfg)
-    % Board only, for watching the load change on a handheld meter clipped
-    % across J1 and J3 with no cell in the loop. Same states runBoardCheck
-    % walks, held long enough to read.
-    %
-    % The plan is already sorted by resistance, so stepping through it evenly
+    % Board only, for watching the load change on a handheld across J1 and
+    % J3 with no cell. The plan is sorted by resistance, so stepping evenly
     % climbs from the SHORT contact to the 470 kohm OPEN path without going
-    % back on itself. Relays click on the way, which is part of what is being
-    % checked.
+    % back on itself.
     %
-    % The printed ohms are the resistance model, not a measurement. R_WIPER is
-    % the 155 ohm measured on board 2 and R_AB is +/-20%, so a meter that
-    % disagrees at the low end is the model's tolerance rather than the board
-    % being wrong. A disagreement larger than that on a different board is
-    % worth keeping: it is what R_WIPER should be set to for that one.
+    % The printed ohms are the model, not a measurement: R_AB is +/-20%, so
+    % a meter disagreeing at the low end is the model's tolerance. A larger
+    % disagreement on a different board is what R_WIPER should be for it.
 
         plan  = Plan.build(cfg);
         board = Board.connect(cfg);
@@ -116,24 +110,18 @@ methods (Static)
     end
 
     function runWiper(cfg)
-    % Board only. Wiper resistance measured by difference, which is the only
-    % way to get it off a handheld: every reading shares the same probes,
-    % jacks and traces, so subtracting two of them cancels all of that.
-    %
-    % Writing s for the ladder step and taking FULL at a code sum of n, which
-    % splits as U1 = n and U2 = 0:
+    % Board only. Wiper resistance by difference, the only way to get it
+    % off a handheld: every reading shares the same probes and jacks, so
+    % subtracting two cancels them. Writing s for the ladder step:
     %
     %   SHORT   = K2
     %   LOW(n)  = K1 + Rw1 + n*s + K3
     %   FULL(n) = K1 + Rw1 + n*s + Rw2
     %
-    % so LOW(0) - SHORT is Rw1 and FULL(n) - LOW(n) is Rw2, both to within a
-    % reed contact, which is 0.150 ohm. Neither difference contains the leads,
-    % the jacks or K1, so a bad probe offset does not reach the answer.
-    %
-    % Repeating across codes is the check that matters. Rw2 is a switch, not a
-    % resistor, so the same number should come back at every code. A
-    % difference that tracks the code is R_AB being wrong instead.
+    % so LOW(0) - SHORT is Rw1 and FULL(n) - LOW(n) is Rw2, each to within
+    % a 0.150 ohm reed contact. Repeating across codes is the check that
+    % matters: Rw2 is a switch, so the same number should come back every
+    % time, and a difference tracking the code is R_AB being wrong.
 
         plan  = Plan.build(cfg);
         board = Board.connect(cfg);
@@ -182,12 +170,10 @@ methods (Static)
     function runK3(cfg)
     % Four holds and one question: does K3 close.
     %
-    % K3 shorts out U2 whenever the board is in LOW, so U2's code cannot reach
-    % the terminals and all four holds have to read alike. If they do not, K3
-    % never operated and U2 has been in the path the whole time. That failure
-    % is invisible everywhere else on this board, because it only makes LOW and
-    % FULL read the same, which looks like a component with no resistance
-    % rather than a relay that did not move.
+    % K3 shorts out U2 in LOW, so U2's code cannot reach the terminals and
+    % all four holds must read alike. If they do not, U2 has been in the
+    % path the whole time -- a failure invisible everywhere else, because it
+    % only makes LOW and FULL read the same.
     %
     % The codes are written straight to the pots instead of coming from the
     % plan, because no planned state drives U2 while K3 is closed.
@@ -217,19 +203,15 @@ methods (Static)
     end
 
     function runVerify(cfg)
-    % Board only, for deciding whether a freshly assembled board is sound.
-    % Seven holds that between them touch both chips over SPI, all three
-    % relays, both ladders and R1. Nothing else on the board is load bearing.
+    % Whether a freshly assembled board is sound. Seven holds that between
+    % them touch both chips over SPI, all three relays, both ladders and R1.
     %
-    % The pass conditions are comparisons rather than absolute numbers. A
-    % handheld carries its leads, its clips and both jacks in every reading,
-    % which is tens of ohms and drifts, and every check below is a difference
-    % or an order of magnitude, so none of them notice.
-    %
-    % Two holds are written straight to the pots rather than taken from the
-    % plan. LOW always carries a zero second code in a sweep, so no planned
-    % state drives U2 while K3 is meant to be shorting it out, which is
-    % exactly the case that catches a relay that never operates.
+    % Pass conditions are comparisons, not absolute numbers, because a
+    % handheld carries tens of drifting ohms of lead and jack in every
+    % reading. Two holds are written straight to the pots: LOW always
+    % carries a zero second code in a sweep, so no planned state drives U2
+    % while K3 should be shorting it, which is the case that catches a
+    % relay that never operates.
 
         board = Board.connect(cfg);
         guard = onCleanup(@() pvload.Util.quietly(@() pvload.Board.safeState(board)));
@@ -275,20 +257,14 @@ methods (Static)
     end
 
     function runOhms(cfg)
-    % Board and one meter, on ohms across J1 and J3 and with no cell in the
-    % loop. Every state in the sweep is visited once and the
-    % meter reads the load directly, so the resistance comes off an instrument
-    % instead of off the model.
+    % Board and one meter on ohms across J1 and J3, no cell. Every state is
+    % visited once and the meter reads the load directly, so resistance
+    % comes off an instrument instead of the model -- "ramp" without a human
+    % copying numbers down. A constant offset of a few ohms across every
+    % point is the wiring, not the board.
     %
-    % This does what "ramp" does without a human copying numbers off a
-    % handheld, which is the only reason it needs a meter at all. The reading
-    % carries the leads, the jacks and the traces the same way a handheld does,
-    % so a constant offset of a few ohms across every point is the wiring and
-    % not the board.
-    %
-    % One meter, so DMM_ENABLED stays out of it: that flag says whether the
-    % pair the sweep needs is attached, and this mode needs neither of them in
-    % particular.
+    % DMM_ENABLED stays out of it: that flag is about the pair the sweep
+    % needs, and this mode needs neither in particular.
 
         plan  = Plan.build(cfg);
 

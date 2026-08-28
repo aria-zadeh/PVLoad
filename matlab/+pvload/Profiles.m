@@ -1,18 +1,14 @@
 classdef Profiles
-% What each instrument speaks. Part of the meter library with Meter.m, and
+% What each instrument speaks. Part of the meter library with Meter.m and
 % like it depends on nothing else in pvload. docs/METERS.md is the long
 % version; only the reasons a value cannot change are repeated here.
 %
-% Both bench instruments are 6.5 digit DMMs rather than electrometers, so
-% neither has zero check and both read current across a shunt. The model is
-% named per meter rather than once for the bench, because the voltmeter and
-% the ammeter need not be the same instrument and here they are not.
-%
-% The 196 predates SCPI: a command is a letter and a number, several travel
-% in one string, and nothing executes until an X arrives. The 34401A is
-% SCPI: words, one per line, and a reading is a bare number. Nothing above
-% the transport is shared, so each profile carries a Dialect and the bus
-% functions branch on it.
+% The 196 predates SCPI: letters and numbers, several per string, nothing
+% executing until an X arrives. The 34401A is SCPI: words, one per line, a
+% bare number for a reading. Nothing above the transport is shared, so each
+% profile carries a Dialect and the bus functions branch on it. The model
+% is named per meter because the voltmeter and the ammeter need not be the
+% same instrument, and here they are not.
 
 methods (Static)
 

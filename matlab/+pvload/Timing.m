@@ -41,26 +41,21 @@ function settle = settleFor(state, prevMode, cfg)
         T.Safety * (tSwitch + T.TauCount * state.Resistance * T.CLoad + ...
                     T.CellSettle));
 
-    % Capped by what is left of the point's budget once the conversion and
-    % the board have taken their share, so the ceiling is on the state and
-    % not merely on the pause inside it. The run time is a decision; the
-    % settle formula is an estimate, and a measured capacitance asking for
-    % seconds per state is exactly the case where waiting costs most, since
-    % the longer the sweep the further anything drifting has moved by the
-    % end of it.
+    % Capped by what is left of the budget once the conversion and the
+    % board have taken their share, so the ceiling is on the state and not
+    % merely on the pause inside it. Run time is a decision; the settle
+    % formula is only an estimate, and the longer the sweep the further
+    % anything drifting has moved by the end of it.
     settle = min(settle, settleCap(cfg));
 end
 
 function cap = settleCap(cfg)
 % What the hold may be if the state is to fit the budget. Never below the
-% relay settle, which is a hardware minimum rather than a preference.
+% relay settle, which is a hardware minimum.
 %
-% This shortens the waiting and nothing else. The conversion that follows
-% runs to completion, the reading is collected, and a point that overruns
-% because a meter changed range or an overflow had to be read again still
-% finishes and still lands in the CSV. No state is skipped and no reading
-% is cut short to make the time; the budget decides how long the sweep
-% pauses, not whether it measures.
+% This shortens waiting and nothing else: no state is skipped and no
+% reading cut short. A point that overruns because a meter re-ranged still
+% finishes and still lands in the CSV.
 
     T = cfg.Timing;
     cap = T.Budget - T.Overhead - conversionTime(cfg);

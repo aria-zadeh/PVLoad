@@ -137,30 +137,15 @@ function path = resolvePath(relative)
 end
 
 function plotOhmsRun(plan, measured, path)
-% Linear axes, with the model plotted alongside because the interesting
-% part is where the two part company.
+% Linear axes with the model alongside, because the interesting part is
+% where the two part company. The lower axes is a ratio rather than a
+% difference or a percentage: both of those are dominated by one end, and a
+% ratio holds five decades at once with 1 meaning agreement.
 %
-% The sweep spans five decades, so a linear upper axes is set by the top of
-% the range and everything below a kilohm sits on the x axis. The lower
-% axes is what carries the bottom of the sweep. It is the ratio rather than
-% a difference or a percentage because both of those are dominated by one
-% end: the SHORT state models at 0.150 ohm, so any offset at all is
-% thousands of a percent there, and R_AB's 20% at the top is tens of kohm.
-% A ratio holds the whole range at once, and 1 is agreement.
-%
-% Two endpoints are left off the axes because each one sets a scale that
-% hides the other 767 states. OPEN comes off both: it is the 470 kohm
-% resistor rather than the ladders, and forty times the largest ladder
-% state. SHORT comes off the ratio axes only: it models at 0.150 ohm, so
-% the probe path alone puts its ratio near 3 while every other state sits
-% within a percent of 1.
-%
-% Both stay in the CSV, and the labels say what is missing. This is a
-% choice about the axes, not about what gets measured.
-%
-% Nothing else is clipped or blanked. A linear axes draws a zero or
-% negative reading where a log axes would have dropped it, so the count
-% below names only what the meter did not return at all.
+% OPEN is left off both axes and SHORT off the ratio, because each sets a
+% scale that hides the other 767 states. Both stay in the CSV; this is a
+% choice about the axes, not about what gets measured. Nothing else is
+% clipped, so the count below names only what the meter never returned.
 
     model = [plan.Resistance]';
     index = (1:numel(plan))';

@@ -111,15 +111,11 @@ function results = runSweep(board, meas, plan, cfg, log)
 end
 
 function results = runSweepAdaptive(board, meas, master, cfg, log)
-% The coarse pass, then rounds of states added between measured neighbours
-% wherever refineIntervals asks, until it stops asking or the point cap
-% lands. Refinement decides from the measured columns only; the master
-% plan supplies the codes and the order, which is the job the resistance
-% model has always had. Every round runs in that order, so the settles see
-% the same ascending walk the fixed sweep makes.
-%
-% Faults follow runSweep's rule: the first point failing is
-% misconfiguration, and MaxFaults in a row aborts.
+% The coarse pass, then rounds of states added wherever refineIntervals
+% asks, until it stops asking or the cap lands. Every round runs in master
+% plan order, so the settles see the same ascending walk the fixed sweep
+% makes. Faults follow runSweep's rule: first point failing aborts, and so
+% does MaxFaults in a row.
 
     cap      = min(cfg.Adapt.MaxPoints, numel(master));
     results  = allocateResults(cap);
@@ -212,24 +208,20 @@ end
 
 function next = refineIntervals(measured, V, I, cfg)
 % Where the measured curve says another state is needed. Three rules, all
-% of them read off the measured voltages and currents, normalised to the
-% measured span so one setting serves any cell:
+% off the measured V and I and normalised to the measured span so one
+% setting serves any cell:
 %
-%   - a segment between neighbours longer than Gap is split whatever its
-%     shape. a knee can sit entirely between two coarse states whose own
-%     readings both look tame, and only the length of the jump shows it.
-%   - a point sitting further than Bend off the chord of its neighbours
-%     marks a bend, and both segments at it are split.
-%   - the two segments at the largest measured power are always split, so
-%     the maximum power point ends up resolved as finely as the ladder
-%     goes even once the curve there looks locally straight.
+%   - a segment longer than Gap splits whatever its shape, because a knee
+%     can sit between two coarse states that both read flat.
+%   - a point further than Bend off the chord of its neighbours is a bend,
+%     and both segments at it split.
+%   - the two segments at the largest measured power always split.
 %
-% Splitting is by position in the master plan, which the resistance model
-% ordered: the model still only orders, the measurements decide. A
-% segment between plan neighbours cannot be split further and drops out
-% on its own, which is what ends the refinement. A state that returned
-% NaN takes no part in the geometry, so a dropped reading widens a
-% segment rather than poisoning it.
+% Splitting is by position in the master plan: the model orders, the
+% measurements decide. A segment between plan neighbours cannot split
+% further and drops out, which is what ends the refinement. A NaN takes no
+% part in the geometry, so a dropped reading widens a segment rather than
+% poisoning it.
 
     next = [];
     idx  = find(measured(:) & ~isnan(V(:)) & ~isnan(I(:)));
@@ -274,13 +266,11 @@ function next = refineIntervals(measured, V, I, cfg)
 end
 
 function checkDrift(board, meas, master, results, prev, cfg)
-% The SHORT state measured again after the last point brackets the run:
-% the cell has no memory, so a first and last reading of the same state
-% that disagree are the illumination having moved while the sweep ran,
-% and every point in between was taken somewhere along that slide. The
-% 174402 run wobbled 1-2% in seconds and the wobble is what the plateau's
-% zigzag is. Reported rather than corrected, and not a row in the CSV, so
-% the sweep's own SHORT stays the Isc.
+% SHORT measured again after the last point brackets the run. The cell has
+% no memory, so a first and last reading that disagree are the illumination
+% having moved, and every point between was taken along that slide -- the
+% 174402 run wobbled 1-2% in seconds. Reported, never corrected, and no CSV
+% row, so the sweep's own SHORT stays the Isc.
 
     at = find([master.Mode] == "SHORT", 1);
     first = find(results.Mode == "SHORT", 1);
@@ -385,13 +375,10 @@ end
 %  =====================================================================
 
 function safeShutdown(board, meas, cfg)
-% Every step is guarded separately and none rethrow, because this runs
-% during an interrupt and an error raised here would mask whatever caused
-% the abort.
-%
-% The cell is a supply and the board is what stands between it and a
-% short, so returning the board to OPEN is the whole job. Darkening the
-% cell is the operator's, the same as lighting it was.
+% Every step guarded separately and none rethrow: this runs during an
+% interrupt, and an error here would mask whatever caused the abort.
+% Returning the board to OPEN is the whole job; darkening the cell is the
+% operator's, the same as lighting it was.
 
     try
         Board.safeState(board);

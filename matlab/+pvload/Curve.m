@@ -11,24 +11,14 @@ classdef Curve
 methods (Static)
 
     function stats = summarise(results, cfg)
-    % The numbers a cell is judged by, off the measured columns and nothing
-    % else.
+    % Off the measured columns and nothing else.
     %
-    % Magnitudes throughout. Which sign the current and the voltage carry
-    % depends on which way the leads went on, and a curve that lands in the
-    % fourth quadrant is a wiring choice rather than a different cell. Papers
-    % plot the first quadrant. The CSV keeps the signs the meters reported.
-    %
-    % Isc and Voc are read from the two endpoint states rather than from the
-    % extremes of the sweep, because that is what those states are for: SHORT
-    % is the cell into a reed contact and OPEN is the cell into 470 kohm.
-    % Neither is a true endpoint, and the second is the weaker: the 470 kohm
-    % path draws a fixed current, so under weak light the OPEN state stops
-    % being an open circuit. Falling back to the extreme of what was measured
-    % keeps a partial run useful, and the flags say which happened.
-    %
-    % Efficiency is deliberately absent. It needs the incident optical power,
-    % and the software neither sets the illumination nor knows it.
+    % Isc and Voc come from the SHORT and OPEN states rather than the
+    % extremes of the sweep, because that is what those states are for.
+    % Neither is a true endpoint: the 470 kohm OPEN path draws a fixed
+    % current, so under weak light it stops being an open circuit. Falling
+    % back to the measured extreme keeps a partial run useful, and the
+    % flags say which happened.
 
         v  = abs(results.VoltageV);
         i  = abs(results.CurrentA);
@@ -72,19 +62,13 @@ methods (Static)
             stats.FillFactor = stats.Pmax / (stats.Voc * stats.Isc);
         end
 
-        % Whether the two things the numbers above assume are actually true,
-        % decided from the measurement rather than from the cell model.
-        %
-        % The OPEN state is 470 kohm, not an open circuit. That path draws a
-        % current set by Voc alone while Isc scales with the light, so under
-        % weak illumination it stops being negligible and the voltage there is
-        % a floor under Voc rather than Voc. Fill factor inherits the error.
-        %
-        % The ladder stops at 10.3 kohm. A cell whose knee needs more than
-        % that never leaves its current-source region, and the largest power
-        % in the sweep is then the last point of the ladder rather than a
-        % maximum. Reporting that as Pmax without saying so would be the
-        % worst of the three, because it looks like an answer.
+        % Whether the two assumptions above actually hold, decided from the
+        % measurement rather than the cell model: the OPEN path draws a
+        % current set by Voc while Isc scales with the light, so under weak
+        % illumination Voc is a floor and FF inherits the error; and the
+        % ladder stops at 10.3 kohm, so a cell whose knee needs more never
+        % leaves its current-source region and Pmax is a lower bound.
+        % Reporting either without saying so would look like an answer.
 
         if ~isempty(open) && stats.Isc > 0
             stats.OpenFraction = i(open) / stats.Isc;
@@ -150,20 +134,15 @@ methods (Static)
     end
 
     function draw(results, stats, path)
-    % Laid out the way a cell measurement is published: first quadrant, one
-    % panel, voltage across, current up the left axis and power up the right,
-    % the maximum power point marked on both and the four numbers in a box.
+    % Laid out the way a cell measurement is published: first quadrant,
+    % voltage across, current left and power right, Pmax marked and the
+    % four numbers in a box. Current density only where CELL_AREA_CM2 gives
+    % an area; inventing one would be worse than labelling the axis
+    % honestly.
     %
-    % Current density where CELL_AREA_CM2 gives the area and absolute current
-    % where it does not. A paper reports mA/cm2; a bench with an
-    % uncharacterised receiver has no area to divide by, and inventing one
-    % would be worse than labelling the axis honestly.
-    %
-    % Sorted by voltage before the line is drawn. The sweep is ordered by the
-    % resistance model, and that model is allowed to be wrong about the order,
-    % so joining points in sweep order could draw a line the measurement does
-    % not support. Markers stay on so the sampling is visible: the ladder is
-    % uniform in resistance, which crowds the points hard toward Voc.
+    % Sorted by voltage before the line is drawn, because the sweep is
+    % ordered by the resistance model and that model is allowed to be wrong
+    % about the order.
 
         if stats.Points == 0
             return
@@ -184,15 +163,11 @@ methods (Static)
         i = scale * abs(results.CurrentA);
         p = scale * abs(results.VoltageV .* results.CurrentA);
 
-        % The three circuit configurations are drawn apart. SHORT is the cell
-        % into a reed contact and OPEN is the cell into 470 kohm; between the
-        % top of the ladder and that 470 kohm the board has no states at all,
-        % so a line joining them would draw a straight run of curve through a
-        % region nothing was measured in. On a cell whose knee falls in that
-        % gap, which is any cell too dim for the ladder to load, that line is
-        % the most confident-looking part of the figure and the only part with
-        % no data under it. The ladder gets the line; the endpoints get
-        % markers of their own.
+        % The ladder gets the line; SHORT and OPEN get markers of their
+        % own. The board has no states between the top of the ladder and
+        % the 470 kohm OPEN path, so a line joining them would be the most
+        % confident-looking part of the figure and the only part with no
+        % data under it.
 
         ladder = results.Mode ~= "SHORT" & results.Mode ~= "OPEN";
         [vl, order] = sort(v(ladder));
