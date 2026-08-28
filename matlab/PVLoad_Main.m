@@ -354,7 +354,14 @@ SETTLE_SAFETY = 1.5;       % covers USB jitter and pause() granularity
 RC_TAU_COUNT  = 7;         % time constants. e^-7 is 0.09%.
 C_LOAD        = 300e-12;   % F, dominated by the leads and the meter
                            % input.
-CELL_SETTLE   = 0;         % s for the cell's own junction capacitance.
+CELL_SETTLE   = 0.100;     % s for the cell's own junction capacitance,
+                           % which the 300 pF above does not cover: that
+                           % figure is leads and meter input. Unmeasured on
+                           % this receiver, so this is a deliberate
+                           % over-estimate rather than a number off a
+                           % datasheet. It lands on every state, so it sets
+                           % the floor of the sweep; a run that shows no
+                           % hysteresis against a slower one can lower it.
 
 CSV_CHUNK     = 64;        % states written to disk at a time. writetable
                            % reopens the file per call, so a row at a time
