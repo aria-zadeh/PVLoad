@@ -725,8 +725,8 @@ function runOhmsSweep(cfg)
     % open then still leaves the board guarded.
     board      = connectBoard(cfg);
     boardGuard = onCleanup(@() quietly(@() enterSafeState(board)));
-    meter      = openMeter(cfg, cfg.Dmm.RAddress, "ohms");
-    meterGuard = onCleanup(@() quietly(@() delete(meter)));
+    meter      = openMeter(cfg.Dmm.R, "ohms");
+    meterGuard = onCleanup(@() quietly(@() closePort(meter)));
 
     fprintf("Board connected on %s.\n", cfg.SerialPort);
     enterSafeState(board);
@@ -1406,6 +1406,12 @@ end
 %  =====================================================================
 
 function meas = connectMeters(cfg)
+% Every port opened here is closed again unless all of them come up. The
+% caller's guard is built from the returned struct, so it does not exist
+% while this is running, and a meter that opens and then fails to identify
+% would otherwise be left to whenever MATLAB gets around to collecting it.
+% Closing on the way out makes the next run's open a fresh session rather
+% than a race against the last one.
 
     meas = struct('Enabled', false, 'V', [], 'I', [], ...
                   'VId', "", 'IId', "", 'Faults', 0, 'Cfg', cfg.Dmm);
@@ -1415,20 +1421,27 @@ function meas = connectMeters(cfg)
     end
 
     meas.V = openMeter(cfg.Dmm.V, "voltage");
-    meas.I = openMeter(cfg.Dmm.I, "current");
 
-    meas.VId = identifyMeter(meas.V, "voltage");
-    meas.IId = identifyMeter(meas.I, "current");
-    fprintf("Voltage meter: %s\n", meas.VId);
-    fprintf("Current meter: %s\n", meas.IId);
+    try
+        meas.I = openMeter(cfg.Dmm.I, "current");
 
-    % Both ranges are settled here and never touched again. A range change
-    % costs a fresh configuration, and 769 of those would be absurd; the
-    % range that fits is already known from ISC_FULL and VOC_FULL. Doing it
-    % twice is worse than redundant on a Keithley, where each configuration
-    % leaves another triggered reading behind it.
-    configureMeter(meas.V, "voltage", pickVoltageRange(cfg));
-    configureMeter(meas.I, "current", pickCurrentRange(cfg.Cell.IscFull, cfg));
+        meas.VId = identifyMeter(meas.V, "voltage");
+        meas.IId = identifyMeter(meas.I, "current");
+        fprintf("Voltage meter: %s\n", meas.VId);
+        fprintf("Current meter: %s\n", meas.IId);
+
+        % Both ranges are settled here and never touched again. A range
+        % change costs a fresh configuration, and 769 of those would be
+        % absurd; the range that fits is already known from ISC_FULL and
+        % VOC_FULL. Doing it twice is worse than redundant on a Keithley,
+        % where each configuration leaves another triggered reading behind.
+        configureMeter(meas.V, "voltage", pickVoltageRange(cfg));
+        configureMeter(meas.I, "current", ...
+                       pickCurrentRange(cfg.Cell.IscFull, cfg));
+    catch setupError
+        quietly(@() closeMeters(meas));
+        rethrow(setupError);
+    end
 
     meas.Enabled = true;
 end
