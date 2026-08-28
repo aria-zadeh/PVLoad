@@ -235,6 +235,7 @@ DDC_196 = struct( ...
     'Ohms',       "F2", ...
     'Range',      "R%d", ...
     'AutoRange',  "R0", ...
+    'RangeOnly',  "R%d", ...
     'Prefixes',   "DCV|ACV|OHM|OCO|DCI|ACI|dBV|dBI", ...
     'StatusMap',  struct('F', 3, 'K', 6, 'R', 18, 'S', 19, 'T', 20, 'Z', 27), ...
     'Common',     "Z0B0G0M0K2S3T5", ...
@@ -309,6 +310,7 @@ SCPI_34401A = struct( ...
     'Amps',       "CURR:DC", ...
     'Ohms',       "RES", ...
     'AutoRange',  "RANG:AUTO ON", ...
+    'RangeOnly',  "%s:RANG %g", ...
     'Common',     ["TRIG:SOUR IMM", "TRIG:DEL:AUTO ON", ...
                    "TRIG:COUN 1", "SAMP:COUN 1"], ...
     'AutoZero',   "ZERO:AUTO %s", ...
@@ -988,7 +990,7 @@ function runMeterCheck(cfg)
         1e3 * cfg.Dmm.V.Conversion, 1e3 * cfg.Dmm.I.Conversion);
     fprintf("Ten readings:\n");
     for k = 1:10
-        [v, i, fault] = readPoint(meas, cfg);
+        [v, i, fault, meas] = readPoint(meas, cfg);
         fprintf("  %2d  V = %11.6f   I = %11.6f A%s\n", k, v, i, ...
             ternary(fault, "   (fault)", ""));
     end
@@ -1017,7 +1019,6 @@ function results = runSweepAll(cfg)
     try
         meas = connectMeters(cfg);
         [cfg, meas] = probeRanges(board, meas, cfg, plan);
-        meas = narrowVoltmeter(board, meas, cfg, plan);
         log  = openLog(cfg, numel(plan));
     catch openError
         quietly(@() enterSafeState(board));
@@ -1740,7 +1741,8 @@ function meas = connectMeters(cfg)
 
     meas = struct('Enabled', false, 'V', [], 'I', [], ...
                   'VId', "", 'IId', "", 'Faults', 0, 'Cfg', cfg.Dmm, ...
-                  'VOpenSeen', NaN, 'VLadder', 0, 'VOpen', 0);
+                  'VOpenSeen', NaN, 'VAdaptive', false, ...
+                  'VRangeNow', 0, 'VRanges', [], 'VChanges', 0);
 
     if ~cfg.Dmm.Enabled
         return
@@ -2299,6 +2301,13 @@ function [cfg, meas] = probeRanges(board, meas, cfg, plan)
     fprintf("  ranges %g V and %g mA, 20%% above what the cell showed.\n", ...
         vRange, 1e3 * iRange);
 
+    % From here the voltmeter follows the reading. The ammeter does not:
+    % the current is nearly flat across a sweep, so one range holds it,
+    % and the 196 has nothing below 300 uA to move to anyway.
+    meas.VAdaptive = true;
+    meas.VRangeNow = vRange;
+    meas.VRanges   = meas.V.Ranges;
+
     % The 470 kohm path draws a current fixed by Voc while Isc scales with
     % the light, so under weak illumination the OPEN state stops being an
     % open circuit. Now measured rather than estimated, and worth saying
@@ -2413,146 +2422,7 @@ function cfg = measureSettle(board, meas, cfg, plan)
     end
 end
 
-function meas = narrowVoltmeter(board, meas, cfg, plan)
-% The OPEN state is the only one that needs the wide voltage range, and it
-% is one state out of 769.
-%
-% Everything else sits below the top of the ladder, which on a weakly lit
-% cell is a small fraction of Voc: the first cell run spent 768 states
-% between 0.6 mV and 0.68 V with the meter on the 10 V range its 3.4 V
-% OPEN reading had asked for. On the 34401A that range carries 10 uV of
-% resolution and 0.0005% of range of floor error, which at 0.1 V is 50 uV
-% against 3.5 uV of gain error, so the floor is the whole error. One range
-% down cuts it tenfold, and the plateau is where every point of the curve
-% lives.
-%
-% The plan is ordered by resistance and OPEN is last, so the switch back
-% happens once, at the end. That is what makes this affordable: a range
-% change costs a reconfiguration and the sweep cannot have one per point.
-
-    meas.VLadder = 0;
-    meas.VOpen   = 0;
-
-    if ~meas.Enabled || meas.V.Range > 0 || isnan(meas.VOpenSeen)
-        return
-    end
-
-    ladder  = [plan.Mode] ~= "SHORT" & [plan.Mode] ~= "OPEN";
-    [~, at] = max([plan.Resistance] .* ladder);
-
-    applyState(board, plan(at), settleFor(plan(at), "", cfg));
-
-    try
-        top = abs(meterReadOnce(meas.V));
-    catch
-        top = NaN;
-    end
-
-    enterSafeState(board);
-
-    if isnan(top) || top <= 0
-        return
-    end
-
-    wide   = pickVoltageRange(cfg, meas.VOpenSeen);
-    narrow = pickVoltageRange(cfg, top);
-
-    if narrow >= wide
-        return                      % one range already covers both
-    end
-
-    meas.VLadder = narrow;
-    meas.VOpen   = wide;
-    configureMeter(meas.V, "voltage", narrow);
-
-    fprintf("  ladder tops out at %.4f V, so it runs on the %g V range " + ...
-        "and only\n  the OPEN state uses %g V.\n", top, narrow, wide);
-end
-
-function widenForOpen(meas, state, prevMode)
-% The one range change the sweep makes, on the way into the OPEN state.
-% Called with the state about to be applied, so the meter is already on
-% the wide range before the cell is put behind 470 kohm.
-
-    if meas.VLadder <= 0 || state.Mode ~= "OPEN" || prevMode == "OPEN"
-        return
-    end
-    configureMeter(meas.V, "voltage", meas.VOpen);
-end
-
-function reportKnee(plan, voc, isc)
-% Says whether the knee is inside the ladder before the sweep spends
-% minutes finding out.
-%
-% The load sets the operating point: the cell sits where its curve crosses
-% a line of slope 1/R, so the resistance that lands on the maximum power
-% point is Vmp over Imp. Taking the usual 0.8 of Voc and 0.9 of Isc is
-% rough, and rough is enough for the only question here, which is whether
-% that resistance is inside the range of a board whose ladder spans two
-% decades.
-%
-% This prints and warns and does nothing else. It cannot skip a state or
-% choose one, which is the same rule the resistance model has always run
-% under: R_AB is plus or minus 20%, the wiper is measured on one board,
-% and neither is allowed to decide what gets measured. It is allowed to
-% decide what the operator is told before the run.
-
-    ladder = [plan.Mode] ~= "SHORT" & [plan.Mode] ~= "OPEN";
-    lo     = min([plan(ladder).Resistance]);
-    hi     = max([plan(ladder).Resistance]);
-    rMpp   = (0.8 * voc) / (0.9 * isc);
-
-    fprintf("  knee near %.0f ohm; the ladder covers %.0f to %.0f.\n", ...
-        rMpp, lo, hi);
-
-    if rMpp > hi
-        warning("PVLoad:KneeAboveLadder", ...
-            "The maximum power point of this cell wants about %.0f ohm " + ...
-            "and the ladder stops at %.0f. The sweep will measure the " + ...
-            "current-source plateau and stop short of the knee, and Pmax " + ...
-            "will be a lower bound. About %.0f uA of short-circuit " + ...
-            "current would bring the knee to the top of the ladder, " + ...
-            "which is %.1fx this illumination.", ...
-            rMpp, hi, 1e6 * (0.8 * voc) / (0.9 * hi), rMpp / hi);
-    elseif rMpp < lo
-        warning("PVLoad:KneeBelowLadder", ...
-            "The maximum power point of this cell wants about %.0f ohm " + ...
-            "and the ladder starts at %.0f, which is the wiper " + ...
-            "resistance. Only the SHORT state sits below the knee, so the " + ...
-            "sweep will start past it. Less light would bring it back.", ...
-            rMpp, lo);
-    end
-end
-
-function state = probeState(mode)
-% The settle a state of this mode gets, without going through the plan.
-    state = struct('Mode', string(mode), 'Code1', 0, 'Code2', 0, ...
-                   'Resistance', 0);
-end
-
-function value = probeRead(m, role, mode)
-% One reading, and it has to arrive. A probe that quietly returned NaN
-% would size the range from nothing and the whole run would inherit it.
-
-    try
-        value = meterReadOnce(m);
-    catch readError
-        error("PVLoad:ProbeFailed", ...
-            "The %s meter (%s) could not be read at the %s state while " + ...
-            "sizing its range: %s", role, m.Label, mode, readError.message);
-    end
-
-    value = abs(value);
-
-    if isnan(value) || value <= 0
-        error("PVLoad:ProbeFailed", ...
-            "The %s meter (%s) returned %g at the %s state while sizing " + ...
-            "its range. On autorange that is an open lead, a dark cell, " + ...
-            "or a meter on the wrong function.", role, m.Label, value, mode);
-    end
-end
-
-function [volts, amps, fault] = readPoint(meas, cfg)
+function [volts, amps, fault, meas] = readPoint(meas, cfg)
 % Both meters are triggered before either reply is collected, so the two
 % conversions overlap. Each dialect gets there its own way, and with two
 % different instruments on the bench both ways are in use at once. On the
@@ -2587,7 +2457,110 @@ function [volts, amps, fault] = readPoint(meas, cfg)
         fault = true;
     end
 
+    if meas.VAdaptive
+        [volts, meas] = adaptVoltage(meas, volts);
+    end
+
     fault = fault || isnan(volts) || isnan(amps);
+end
+
+function [volts, meas] = adaptVoltage(meas, volts)
+% Keeps the voltmeter on the smallest range the reading fits, one state at
+% a time.
+%
+% This is worth doing because the error is not one number. A 34401A on its
+% 10 V range carries 0.0035% of reading plus 0.0005% of range, and at
+% 10 mV that second term is 50 uV against 0.35 uV from the first: on a
+% sweep whose ladder crosses three decades, the points near the bottom are
+% almost entirely range floor. A decade of range is a decade off that
+% floor, and the ladder of a dim cell spends a third of its states down
+% there.
+%
+% Two rules, and hysteresis between them so a reading sitting near a
+% boundary cannot oscillate. Widen when the reading passes 90% of range or
+% comes back as overflow. Narrow when it drops under 8% of the range below
+% the one in use, which is a decade of margin on a meter whose ranges step
+% by ten.
+%
+% Overflow is recovered rather than logged. The alternative is a NaN in
+% the CSV at exactly the state where the curve turns, since that is where
+% the voltage climbs fastest, and five of those in a row would abort a run
+% that was measuring perfectly well.
+
+    if isnan(volts)
+        wider = smallestAbove(meas.VRanges, meas.VRangeNow);
+        if isempty(wider)
+            return                  % already as wide as the meter goes
+        end
+        meas = useVoltageRange(meas, wider);
+        try
+            volts = meterReadOnce(meas.V);
+        catch
+            volts = NaN;
+        end
+        return
+    end
+
+    magnitude = abs(volts);
+
+    if magnitude > 0.9 * meas.VRangeNow
+        wider = smallestAbove(meas.VRanges, meas.VRangeNow);
+        if ~isempty(wider)
+            meas = useVoltageRange(meas, wider);
+        end
+        return
+    end
+
+    % The smallest range that holds this reading with a tenth to spare,
+    % which may be several decades down: the state after SHORT drops from
+    % volts to millivolts in one step, and stepping one range at a time
+    % would spend the whole bottom of the ladder catching up.
+    target = min(meas.VRanges(meas.VRanges >= magnitude / 0.9));
+    if isempty(target)
+        return
+    end
+
+    % Narrowing is held off until the reading is under 8% of the range in
+    % use, while widening happens at 90%. The gap between those two is what
+    % stops a reading parked near a boundary from changing range at every
+    % state for the rest of the sweep.
+    if target < meas.VRangeNow && magnitude < 0.08 * meas.VRangeNow
+        meas = useVoltageRange(meas, target);
+    end
+end
+
+function meas = useVoltageRange(meas, range)
+    setMeterRange(meas.V, "voltage", range);
+    meas.VRangeNow = range;
+    meas.VChanges  = meas.VChanges + 1;
+end
+
+function out = smallestAbove(ranges, value)
+    out = min(ranges(ranges > value * 1.0001));
+end
+
+function setMeterRange(m, role, range)
+% Range alone, without the function and without everything else the
+% configuration carries. On the 34401A that matters: CONF resets the
+% integration time, the autozero and the input impedance to that
+% function's defaults, so re-configuring mid-sweep to change a range would
+% quietly drop the meter back to 10 NPLC defaults and no high impedance
+% input. RANGe leaves all of it alone.
+
+    D = m.Ddc;
+
+    if D.Dialect == "scpi"
+        meterTell(m, sprintf(D.RangeOnly, functionFor(D, role), range));
+        return
+    end
+
+    meterTell(m, sprintf(D.RangeOnly, ...
+        rangeCode(range, m.Ranges, rangeSetting(role), m.Label)));
+
+    % That command's X is a trigger like every other, so the conversion it
+    % starts is discarded before the next point asks for its own.
+    pause(0.15);
+    flush(m.Port, "input");
 end
 
 function meterTrigger(m)
@@ -2856,11 +2829,10 @@ function results = runSweep(board, meas, plan, cfg, log)
 
     for k = 1:total
         settle = settleFor(plan(k), prev, cfg);
-        widenForOpen(meas, plan(k), prev);
         applyState(board, plan(k), settle);
         prev = plan(k).Mode;
 
-        [volts, amps, fault] = readPoint(meas, cfg);
+        [volts, amps, fault, meas] = readPoint(meas, cfg);
 
         if fault
             faults = faults + 1;
@@ -2891,6 +2863,10 @@ function results = runSweep(board, meas, plan, cfg, log)
     end
 
     fprintf("\n%d read fault(s).\n", faults);
+    if meas.VAdaptive && meas.VChanges > 0
+        fprintf("The voltmeter changed range %d time(s), ending on %g V.\n", ...
+            meas.VChanges, meas.VRangeNow);
+    end
 end
 
 function results = allocateResults(nStates)
