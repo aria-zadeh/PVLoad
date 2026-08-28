@@ -23,7 +23,7 @@ clc;
 %   "meters"  both sweep meters only
 %   "sweep"   the full experiment, written to CSV
 
-RUN = "sweep";  
+RUN = "meters";  
 
 
 % Ports and addresses, and what each one needs on the bench. Wiring and the
@@ -1518,11 +1518,16 @@ function m = openMeter(spec, role)
         % first query then waits on a terminator that has already gone past.
         % Without this every first read times out.
         flush(m.Port, "input");
-        if D.Dialect == "scpi" && startsWith(upper(string(spec.Address)), "ASRL")
-            % Over RS-232 the meter comes up in local and ignores the bus
-            % until this arrives. Over GPIB the addressing does it and the
-            % command is not one the meter accepts, so it is sent only here.
-            writeline(m.Port, "SYST:REM");
+        if D.Dialect == "scpi"
+            if startsWith(upper(string(spec.Address)), "ASRL")
+                % Over RS-232 the meter comes up in local and ignores the
+                % bus until this arrives. Over GPIB the addressing does it
+                % and the command is not one the meter accepts, so it is
+                % sent only here.
+                writeline(m.Port, "SYST:REM");
+            end
+        else
+            primeDdc(m);
         end
     catch openError
         error("PVLoad:MeterOpenFailed", ...
@@ -1530,6 +1535,24 @@ function m = openMeter(spec, role)
             role, spec.Label, spec.Address, openError.message, ...
             availableResources());
     end
+end
+
+function primeDdc(m)
+% The first command written to a 196 after visadev opens the session does
+% not reach it. Measured on the bench and reproducible on every run: the
+% query that follows times out, the same query sent again answers at once,
+% and the error word afterwards is all zeros, so nothing was rejected. The
+% write is simply lost while the session comes up, and flushing the input
+% does not help because the problem is on the way out rather than the way
+% in.
+%
+% A bare X is sent here to be the one that is lost. If it does arrive it is
+% a trigger under T5 and nothing else, so the conversion it may start is
+% flushed before anything asks a question.
+
+    ddcTell(m.Port, "");
+    pause(0.1);
+    flush(m.Port, "input");
 end
 
 function text = availableResources()

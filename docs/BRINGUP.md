@@ -201,10 +201,18 @@ from table 3-8, the 24 ms conversion from table 3-16, the reading tags from
 figure 3-6. Inference had the lowest amps range at 3 mA where it is 300 uA, and
 the conversion at 350 ms where it is 24 ms.
 
-**The input-only flush and the `DCI` tag have not been run on the bench.** They
-were written after the last session at the instruments. The check is one
-`RUN = "meters"`: the 196's front panel has to read amps, and the current column
-has to sit near zero on an open loop rather than at a few hundred micro-anything.
+**The input-only flush and the `DCI` tag passed on the bench.** One
+`RUN = "meters"` with both instruments attached and nothing connected to their
+inputs: both identify, both configure with clean error words, and ten readings
+sit at noise, volts around a hundred microvolts and current at one count on the
+30 mA range. The 196 read amps and the 34401A volts.
+
+**The 196 drops the first command of a fresh session.** Found by the same run:
+`U0` timed out on the first attempt every time and answered immediately on the
+second, with `U1` clean, so the write was lost rather than rejected. Distinct
+from the stale-reply fault already recorded, which flushing fixes and this does
+not. `openMeter` writes a throwaway `X` and flushes before the first question;
+`docs/TROUBLESHOOTING.md` has the symptom written up.
 
 **Overlapped reads are still assumed rather than shown.** Both meters have been
 triggered and collected together, but never against a source that would make a

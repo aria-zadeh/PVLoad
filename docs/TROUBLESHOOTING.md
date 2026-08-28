@@ -214,3 +214,21 @@ it look intermittent when it is not.
 `flush` the session immediately after opening it. `openMeter` does this. The
 write terminator is not involved: `CR/LF` and `LF` behave identically, with and
 without the flush.
+
+## The first command written to the 196 never arrives
+
+Separate fault from the one above, and the flush does not touch it: that one
+loses a reply on the way in, this one loses a command on the way out. The first
+write after `visadev` opens the session is dropped, so the first query times out
+however long the timeout is. Send the same query again and it answers at once,
+and `U1` afterwards is all zeros, so the command was lost rather than rejected.
+Reproduced on every fresh session; the 34401A does not do it.
+
+Which meter opens first does not matter, and neither does anything the front
+panel shows. The panel printing something like `n7u0` during the failure is the
+tail of the dropped exchange and not a state to chase.
+
+`openMeter` now writes one bare `X` after opening a DDC session and flushes
+before the first question, so the throwaway command is the one that is lost. If
+it does arrive it is only a trigger, and the flush eats the conversion it may
+have started.
