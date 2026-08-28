@@ -1573,6 +1573,14 @@ function primeDdc(m)
     pause(0.5);
     ddcTell(m.Port, "");
     pause(0.3);
+    % The fragment has a D in it, the 196's display-message command, so
+    % executing it paints the tail of *IDN? onto the front panel, where it
+    % reads n7. A painted message stays until a bare D restores the
+    % display, so one is sent every open. The TRIG ERROR the display
+    % flashes at the same moment is the same execution and just as
+    % cosmetic; it clears when the first real reading lands.
+    ddcTell(m.Port, "D");
+    pause(0.3);
     flush(m.Port, "input");
 
     for attempt = 1:3

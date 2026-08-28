@@ -247,4 +247,11 @@ machine word back and compares the digits against what was sent, positions
 mapped on this bench by toggling one setting at a time. The error word says
 what the meter has been through; the machine word says what it is in.
 
+The fragment also paints the front panel. `*IDN?` contains a `D`, the 196's
+display-message command, so executing it leaves the tail of the query on the
+display, where it reads `n7`, and a painted message stays until a bare `D`
+restores the display. `primeDdc` sends that too. The `TRIG ERROR` the panel
+flashes at the moment the fragment executes is the same event and clears when
+the first real reading lands.
+
 The 34401A is immune: `*IDN?` is exactly what it expects.
