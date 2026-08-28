@@ -216,9 +216,11 @@ describes the pin map and the meter command sets, and changes only with the hard
 | `DMM_V_ADDRESS`, `DMM_I_ADDRESS` | VISA resource strings; enumerate with `visadevlist` |
 | `DMM_R_ADDRESS` | VISA resource string of the single meter `"ohms"` uses; that mode ignores `DMM_ENABLED` |
 | `DMM_V_MODEL`, `DMM_I_MODEL`, `DMM_R_MODEL` | `"196"` or `"34401A"` per meter; selects the command profile and range lists. They need not match |
-| `DMM_V_RANGE`, `DMM_I_RANGE`, `DMM_R_RANGE` | Fixed meter ranges, or 0 to size from `VOC_FULL`, `ISC_FULL`, and autorange |
+| `DMM_V_RANGE`, `DMM_I_RANGE`, `DMM_R_RANGE` | Fixed meter ranges, or 0 to size from the probe and then follow the reading |
+| `CODE_STEP` | States visited, `767/step + 2`. 1 gives 769 and about six minutes, 16 gives 50 and about half a minute |
+| `POINT_BUDGET` | The most one state may cost end to end. The hold is what is left after the conversion and the board |
 | `DMM_ENABLED` | Whether both sweep meters are attached |
-| `ISC_FULL`, `VOC_FULL` | Approximate cell behavior under the light you will run it at; sizes meter ranges and prints estimates. Past a range they are errors |
+| `ISC_FULL`, `VOC_FULL` | Zero, the normal setting, means the sweep measures the cell itself before it starts and sizes the meters from that. A number pins the range instead, for a family of runs at different light |
 | `RAMP_STEPS`, `RAMP_DWELL` | States visited by `"ramp"` and how long each state is held |
 | `DMM_NPLC`, `DMM_LINE_HZ` | Integration time in power line cycles, and the mains frequency that turns it into seconds. 34401A only |
 | `WIPER_CODES` | Codes `"wiper"` compares at |
@@ -326,8 +328,9 @@ matter; on voltage they are not. Nothing in the configuration warns about this, 
 the configuration knows the source impedance of the cell.
 
 **Current range.** A ~16 mA cell lands on the 196's 30 mA range and the 34401A's 100 mA range. The
-range is chosen once per run from `ISC_FULL` and never autoranged, because a range hunt inside a
-settled point spends conversions on the wrong range. An `ISC_FULL` above the meter's top range is
+range starts where the probe put it and then follows the reading, widening at 90 % of range or on
+an overflow and narrowing under 8 %. A cell whose illumination drifts costs a range change rather
+than the run. An `ISC_FULL` above the meter's top range is
 refused at configuration time; one far below its lowest range is a warning, not an error.
 
 **Isc.** The burden drop and the 0.150 Ω relay contact put the `SHORT` state at millivolts rather

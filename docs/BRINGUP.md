@@ -201,6 +201,43 @@ from table 3-8, the 24 ms conversion from table 3-16, the reading tags from
 figure 3-6. Inference had the lowest amps range at 3 mA where it is 300 uA, and
 the conversion at 350 ms where it is 24 ms.
 
+**The second sweep aborted on drifting illumination, and two of the three
+causes were in the software.** Run `20260828_163338`, tagged `ILASER0p45`, at
+0.45 A of laser drive. The probe measured Isc 123.8 µA and an `OPEN` state of
+3.5945 V, so the extra 0.03 A of drive had nearly doubled the photocurrent and
+brought the knee from 4.5× out of reach to 2.5×. 512 states reached disk before
+the abort at state 541.
+
+What the saved rows show, against the clock rather than against the load:
+
+| time | state | current |
+|---|---|---|
+| 16:33:40 | 1 | 125.2 µA |
+| 16:38:41 | 257 | 158.1 µA |
+| 16:47:35 | 512 | 183.6 µA |
+
+The current rose 1.66× over fourteen minutes while the load resistance was
+*increasing*, which is the opposite of a cell moving along its own curve. The
+illumination was still coming up the whole run. It eventually passed the 300 µA
+range the probe had pinned, six overflows in a row met `DMM_MAX_FAULTS`, and
+the sweep stopped by design with everything up to the last block boundary
+saved.
+
+Two of mine made it worse than it needed to be. The ammeter was pinned on the
+argument that a cell's current is flat across a sweep, which is true of the
+cell and not of the bench; it follows its range now, the way the voltmeter
+already did. Worse, `measureSettle` read the drift as settling and turned 2.5 s
+at 10.3 kΩ into 35 µF of cell capacitance. Nothing has 35 µF. That figure then
+set the hold for every state, so the run took fourteen minutes instead of six
+and gave the drift more than twice as long to work. Drift is told from settling
+by where the change sits in the window now, and drift takes no capacitance from
+the measurement.
+
+The third cause is not fixable in software: a sweep measures each state at a
+different moment, so anything moving on its own tilts the curve. Let the laser
+reach equilibrium before starting, judged by the `SHORT` state current on the
+196 holding still.
+
 **The first sweep on a cell ran clean and the cell is far dimmer than the board
 was sized for.** Run `20260828_145929`, tagged `ILASER0p42`, 0.42 A of laser
 drive: 769 of 769 states, no dropped readings, current drift −0.011 %/min over

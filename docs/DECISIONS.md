@@ -3,6 +3,69 @@
 Rationale for the control software. Hardware rationale is in
 [HARDWARE.md](HARDWARE.md).
 
+## The sweep measures the cell before it measures the curve
+
+`ISC_FULL` and `VOC_FULL` existed for one reason: the meters are put on a fixed
+range before the first state and something has to size them. That number was an
+operator's estimate at an illumination the software cannot see, and when it was
+wrong by 250×, as it was on the first sweep with a cell, the ammeter spent the
+whole run in the bottom 0.2 % of its range.
+
+The sweep already visits the two states that answer the question. `OPEN` is the
+largest voltage of the run and `SHORT` the largest current, and every other
+state is one of those two with resistance added, so two readings on autorange
+bound the whole sweep. `probeRanges` takes them before the run, sizes both
+meters from what it found, and leaves the board back at `OPEN`. Both settings
+default to zero, meaning measure it; a number still pins the range, which is
+what a family of runs at different light wants.
+
+Autorange is reachable for any function rather than ohms alone, which is what
+makes the probe possible. The sweep itself still runs on a settled range,
+because a range hunt inside a point spends conversions on the wrong one.
+
+## The meters follow their range, one state at a time
+
+Fixed ranges were chosen because a range change costs a reconfiguration and 769
+of them would be absurd. Two runs showed what the fixed choice costs.
+
+On volts it is resolution. A 34401A carries 0.0035 % of reading plus 0.0005 % of
+range; at 10 mV on the 10 V range the second term is 50 µV against 0.35 µV from
+the first, so the bottom of a ladder crossing three decades is almost entirely
+range floor. On amps it is survival: a pinned ammeter cannot follow
+illumination that moves, and a range it has run off the top of returns overflow,
+which is a NaN, which after five in a row aborts the run.
+
+Both meters share one follower now. It widens at 90 % of range or on overflow
+and narrows under 8 %, jumping straight to the range that fits, with the gap
+between those thresholds providing hysteresis. Overflow is recovered by
+widening and reading again rather than logged as a fault. The command is
+`RANGe` alone, never `CONF`, which would reset integration time, autozero and
+input impedance to the function's defaults. Range changes turn out to be a
+handful per run, not one per point, because the sweep is ordered by resistance
+and therefore roughly by voltage.
+
+## A point costs a second, and the budget says so
+
+Run time is a decision. The settle formula is an estimate, and an estimate that
+asks for seconds per state is exactly the case where waiting costs most: the
+longer the sweep, the further anything drifting has moved by the end of it.
+
+`POINT_BUDGET` is what one state may cost end to end. The hold is whatever is
+left of it after the conversion and the board have taken their share, so the
+ceiling is on the state rather than on the pause inside it. `CODE_STEP` sets how
+many states there are, `767/step + 2`, thinning by wiper code and never by
+resistance. 16 gives 50 states and a run of about half a minute.
+
+The cap shortens waiting and nothing else. Conversions run to completion, every
+reading is collected, and a point that overruns because a meter re-ranged or an
+overflow had to be read twice still finishes and still lands in the CSV.
+
+`BOARD_OVERHEAD` is in the arithmetic because leaving it out is what made the
+old estimate lie: seven USB round trips per state for the relays, the wipers and
+the readbacks. The sweep now reports what a state actually cost against what it
+was told, so a gap that size cannot pass unnoticed again.
+
+
 ## Sweep the combined code, not each pot
 
 The two potentiometers are in series, so only the sum of the two wiper codes

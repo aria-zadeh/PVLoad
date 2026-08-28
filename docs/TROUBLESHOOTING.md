@@ -204,6 +204,27 @@ It worked when `instrhwinfo('visa')` lists `keysight` and `visadevlist` shows th
 instrument. A MATLAB repair or reinstall puts the old files back and returns the
 fault.
 
+## The current climbs through the run and the sweep aborts
+
+A cell's current is flat until the knee and then falls. Current that rises while
+the load resistance rises is not the cell; it is the illumination still coming
+up, and it tracks the clock rather than the load. Run `20260828_163338` climbed
+1.66× over fourteen minutes and eventually passed the ammeter's range, which
+returns overflow, which is a NaN, and five in a row stop the run.
+
+The ammeter follows its range now, so this costs a range change rather than the
+run, and the end of a sweep reports how many it made. A run that keeps
+re-ranging the ammeter is illumination moving.
+
+`measureSettle` reports the same thing before the run starts. It watches the
+slowest state settle, and if the reading is still moving at the end of the
+window it says so and refuses to take a capacitance from it. A settling cell
+puts its change at the front of the window and leaves the tail flat.
+
+The fix is on the bench: let the source reach equilibrium before starting,
+judged by the `SHORT` state current holding still. Nothing in software can
+correct it, because a sweep measures each state at a different moment.
+
 ## The first read after opening a meter times out
 
 Both meters talk continuously, so `visadev` can open partway through a reading.
