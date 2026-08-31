@@ -64,9 +64,9 @@ DMM_R_ADDRESS = "GPIB0::1::INSTR";  % the one meter RUN "ohms" uses, on
 % ammeter: an ISC_FULL above the highest range the configured meter has is
 % refused rather than measured badly.
 %
-% illumination itself is not this script's business. set the lamp by hand,
-% run the sweep, change the lamp, run it again; each run writes its own
-% timestamped CSV and RUN_TAG is how you tell them apart afterwards.
+% illumination is set by hand: set the lamp, run the sweep, change the
+% lamp, run it again; each run writes its own timestamped CSV and RUN_TAG
+% is how you tell them apart afterwards.
 
 ISC_FULL = 0;              % A, short-circuit current under that light.
 VOC_FULL = 0;              % V, open-circuit voltage under that light.
@@ -80,8 +80,7 @@ VOC_FULL = 0;              % V, open-circuit voltage under that light.
 
 CELL_AREA_CM2 = 0;         % cm2 of illuminated cell, or 0 if not known.
                            % decides whether the figure carries current or
-                           % current density, which is what a paper
-                           % reports. labels output and nothing else.
+                           % current density. labels output and nothing else.
 
 
 
@@ -159,8 +158,8 @@ ADAPT_MAX_ROUNDS  = 12;    % passes including the coarse one. each round
 % Only change it if the hardware changes, and change docs/HARDWARE.md too.
 
 
-% pin map, docs/HARDWARE.md section 4. the SPI pins are fixed by the Uno's
-% hardware SPI peripheral and cannot be reassigned.
+% pin map, docs/HARDWARE.md section 4. SPI pins fixed by the Uno's SPI
+% peripheral, cannot be reassigned.
 
 BOARD_TYPE = "Uno";
 
@@ -175,84 +174,40 @@ PIN_K1_DRIVE = "D6";       % K1, 470 kohm bypass relay. HIGH bypasses it.
 PIN_K2_DRIVE = "D7";       % K2, whole-load short relay. HIGH shorts the cell.
 PIN_K3_DRIVE = "D8";       % K3, DigiPot 2 bypass relay. HIGH bypasses U2.
 
-CODE_STEP     = 16;        % 1 visits all 769 states, 16 visits 50, and the
-                           % count is 767/step + 2. thins by wiper code,
-                           % never by resistance, so which points survive
-                           % does not depend on the resistance model.
+CODE_STEP     = 16;        % states = 767/step + 2. thins by wiper code,
+                           % never by resistance.
 
 
-% orders the sweep and labels output. never enters a result.
+% orders sweep, labels output. never enters a result.
 
 R_AB_NOMINAL = 5000;       % ohms, one MCP41HV51-502 end to end
 WIPER_STEPS  = 255;        % 8-bit ladder has 255 step resistors
-R_WIPER      = 155;        % ohms per device, measured on board 2 with
-                           % RUN "verify" at a 24 V span. the two chips
-                           % agreed to 1%. docs/BRINGUP.md has the numbers.
-                           % affects ordering and labels only.
+R_WIPER      = 155;        % ohms/device, measured board 2, docs/BRINGUP.md
 R_CONTACT    = 0.150;      % ohms, reed contact resistance, maximum
 R_OPEN_PATH  = 470e3;      % ohms, R1
 
 
 
-% meters. Two instruments are on the bench and both are 6.5 digit DMMs
-% rather than electrometers, so neither has zero check and both read
-% current across a shunt:
-%
-%   "196"     Keithley 196 system DMM. Amps start at 300 uA, table 3-9,
-%             and there is no integration time to set.
-%   "34401A"  Agilent 34401A. Amps start at 10 mA. What it adds is an
-%             integration time and a switchable high impedance input, which
-%             is what makes it the better of the two as a voltmeter.
-%
-% The model is named per meter rather than once, because a bench is stocked
-% with whatever it has and the voltmeter and the ammeter need not be the
-% same instrument. Each meter carries its own profile from the moment it is
-% opened, so a sweep can run a 196 on volts and a 34401A on amps.
-%
-% The 196 predates SCPI: a command is a letter and a number, several of
-% them travel in one string, and none of them do anything until an X
-% arrives. The 34401A is SCPI, so commands are words, one per line, and a
-% reading is a bare number with no prefix in front of it. Nothing above the
-% transport is shared between the two dialects, so each profile below
-% carries a Dialect and the handful of functions that talk to the bus
-% branch on it.
+% "196" = Keithley 196 (amps from 300 uA). "34401A" = Agilent 34401A (amps
+% from 10 mA, has NPLC and switchable high-Z input). Named per meter since
+% voltmeter and ammeter need not match.
 
 DMM_V_MODEL      = "34401A";       % "196" or "34401A", per meter.
 DMM_I_MODEL      = "196";          % the sweep's two, and then the single
 DMM_R_MODEL      = "196";          % meter RUN "ohms" opens
 DMM_TIMEOUT      = 10;             % s, must exceed one conversion
-DMM_ZERO_CORRECT = true;           % null the meter's own offset. 34401A
-                                   % only, where it is autozero and costs a
-                                   % second conversion per reading. the 196
-                                   % has nothing equivalent and ignores it.
-DMM_NPLC         = 10;             % power line cycles per conversion.
-                                   % 34401A only: 0.02, 0.2, 1, 10 or 100.
-                                   % 10 is the 6.5 digit setting. the 196
-                                   % converts on a fixed schedule and
-                                   % ignores this.
-DMM_LINE_HZ      = 60;             % mains frequency, which is what turns
-                                   % DMM_NPLC into seconds
-DMM_V_RANGE      = 0;              % V, or 0 to pick the smallest range
-                                   % that holds VOC_FULL
-DMM_I_RANGE      = 0;              % A, or 0 to size it from ISC_FULL
-DMM_R_RANGE      = 0;              % ohm, or 0 for the meter's own
-                                   % autorange. the sweep covers five
-                                   % decades, so no one fixed range holds
-                                   % it and autorange is the default. a
-                                   % fixed range is better where it fits,
-                                   % autoranging costing a hunt at every
-                                   % state that changes decade.
+DMM_ZERO_CORRECT = true;           % null meter offset. 34401A only.
+DMM_NPLC         = 10;             % power line cycles/conversion. 34401A
+                                   % only: 0.02, 0.2, 1, 10 or 100.
+DMM_LINE_HZ      = 60;             % mains frequency
+DMM_V_RANGE      = 0;              % V, or 0 to pick smallest holding VOC_FULL
+DMM_I_RANGE      = 0;              % A, or 0 to size from ISC_FULL
+DMM_R_RANGE      = 0;              % ohm, or 0 for autorange (sweep spans
+                                   % five decades, no fixed range holds it)
 DMM_PARALLEL     = true;           % trigger both meters, then collect both
 DMM_MAX_FAULTS   = 5;              % consecutive read failures before abort
 
-% Keithley 196 system DMM, manual 196-901-01 Rev D, section 3.9. Every
-% letter and range below is off a page of it: functions from 3.9.2, ranges
-% from table 3-9, the rest from the device-dependent command summary,
-% table 3-8.
-%
-% Amps is F3 rather than F1, F1 and F2 being the AC functions. There is no
-% zero check, that being an electrometer facility, so DMM_ZERO_CORRECT does
-% nothing on this meter.
+% Keithley 196, manual 196-901-01 Rev D section 3.9. Amps is F3 (F1/F2 are AC).
 DDC_196 = struct( ...
     'Model',      "196", ...
     'Label',      "Keithley 196", ...
@@ -275,60 +230,17 @@ DDC_196 = struct( ...
     'VRanges',    [0.3 3 30 300], ...
     'IRanges',    [3e-4 3e-3 3e-2 3e-1 3], ...
     'RRanges',    [300 3e3 3e4 3e5 3e6 3e7 3e8]);
-%   Common in order, table 3-8: relative off, so a REL left on the front
-%   panel cannot offset every reading; readings from the A/D rather than
-%   the buffer; send the prefix that flags an overflow; SRQ mask cleared;
-%   EOI on and bus hold-off off, which is what lets the second meter be
-%   triggered while this one is converting; 5.5 digit resolution; and
-%   convert once per X.
-%
-%   Ranges are R1 upward by decades, table 3-9: volts 300 mV to 300 V,
-%   amps 300 uA to 3 A, ohms 300 ohm to 300 Mohm. Note that amps starts a
-%   decade below the 3 mA a 6.5 digit DMM is usually assumed to stop at.
-%
-%   S3 is 6.5 digits and 106 ms, table 3-16, against S2's 5.5 and 24 ms.
-%   The extra digit is free: the readings are overlapped and the 34401A
-%   next to it takes 393 ms at 10 NPLC with autozero, so the 196 finishes
-%   inside that window either way and the point costs the same. On a cell
-%   sitting at a fifth of the 300 uA range that digit is the difference
-%   between 10 nA and 1 nA of resolution.
-%
-%   Prefixes are the reading mnemonics of figure 3-6. DC amps is DCI, not
-%   the DCA another Keithley uses, and a decoder that does not know that
-%   turns every current reading into NaN once the meter is actually on
-%   amps. The bench found this the slow way.
-%
-%   StatusMap is where each setting's digit sits in the U0 machine word,
-%   counted after the 196 prefix. Mapped on the bench by toggling one
-%   setting at a time and diffing the word, because the error word cannot
-%   be trusted after a fresh session open (see primeDdc) and the machine
-%   word is what setup verification reads instead.
+%   DCI not DCA (another Keithley uses DCA) — a decoder that misses this
+%   turns every current reading into NaN. StatusMap is read instead of the
+%   error word because the error word is unreliable after open (primeDdc).
 
-% Agilent 34401A, manual 34401-90004. Ranges are chapter 1, the input
-% resistance rule is chapter 3 under Measurement Configuration, and the
-% shunt values are the DC Characteristics table in chapter 8.
+% Agilent 34401A, manual 34401-90004. NOT RUN AGAINST THE INSTRUMENT YET.
 %
-% NOT RUN AGAINST THE INSTRUMENT YET. The commands are ordinary SCPI read
-% off the manual, but no reading has come back from this meter. The
-% SYST:ERR? query after every setup is what catches one it does not know.
+% CONF resets integration time, autozero and input impedance to defaults,
+% so Common must follow it, not precede it.
 %
-% Volts, Amps and Ohms are the SCPI function nodes rather than letters.
-% They serve twice: CONF:<node> <range> selects function and range in one
-% command, and <node>:NPLC sets the integration time afterwards. Order
-% matters, because CONF resets integration time, autozero and input
-% impedance to that function's defaults, so Common has to follow it.
-%
-% Common in order: immediate trigger, so INIT starts a conversion rather
-% than waiting on the bus; the settling delay the meter computes for the
-% function and range, which is what a fixed 0 would throw away; one trigger
-% and one sample, so a fetched reading is the reading and not the first of
-% a burst.
-%
-% The delay is TRIG:DEL:AUTO ON and not TRIG:DEL AUTO. Manual page 80 gives
-% TRIGger:DELay {<seconds>|MINimum|MAXimum} and TRIGger:DELay:AUTO {OFF|ON}
-% as separate commands, so AUTO is a node rather than a parameter and the
-% shorter form is -224, Illegal parameter value. The meter reported that on
-% the bench before this line was corrected.
+% TRIG:DEL:AUTO ON, not TRIG:DEL AUTO — AUTO is a node, not a parameter
+% (manual p.80); the short form is -224 Illegal parameter value.
 SCPI_34401A = struct( ...
     'Model',      "34401A", ...
     'Label',      "Agilent 34401A", ...
@@ -359,23 +271,10 @@ SCPI_34401A = struct( ...
     'VRanges',    [0.1 1 10 100 1000], ...
     'IRanges',    [0.01 0.1 1 3], ...
     'RRanges',    [100 1e3 1e4 1e5 1e6 1e7 1e8]);
-%   Volts 100 mV to 1000 V by decades, amps 10 mA to 3 A, ohms 100 ohm to
-%   100 Mohm. Conversion is DMM_NPLC line cycles plus about 60 ms of
-%   command and range overhead, doubled when autozero is on because the
-%   meter takes a zero reading between every measurement.
-%
-%   HighZ is sent on the voltmeter only, and it has to be sent after the
-%   CONF: the manual is explicit that CONFigure and MEASure? turn
-%   INP:IMP:AUTO back off. The DC volts input is 10 Mohm until it is set,
-%   and 10 Mohm across the 470 kohm OPEN path is a divider that reads Voc
-%   about 4.5% low. AUTO ON raises it past 10 Gohm, but only on the
-%   100 mV, 1 V and 10 V ranges: a VOC_FULL that pushes the meter onto
-%   100 V puts the divider back. The setting is volatile, so it is sent
-%   every time the meter is configured rather than once.
+%   HighZ must follow CONF (CONFigure/MEASure? reset INP:IMP:AUTO off).
+%   Without it the 10 Mohm input divides against the 470 kohm OPEN path
+%   and reads Voc ~4.5% low. Setting is volatile, sent every configure.
 
-% One profile per meter rather than one for the bench. The two lists carry
-% different fields, so they travel in a cell array rather than a struct
-% array, and selectProfile matches on the Model field.
 PROFILES = {DDC_196, SCPI_34401A};
 
 DDC_V = selectProfile(PROFILES, DMM_V_MODEL, "DMM_V_MODEL");
@@ -399,34 +298,20 @@ POINT_BUDGET  = 1.0;       % s, the most one state may cost end to end.
                            % number the run is actually built to, not an
                            % estimate of one. 50 states at a second is a
                            % minute.
-BOARD_OVERHEAD = 0.08;     % s of USB round trips per state: three relay
-                           % writes, two wiper writes, and two readbacks
-                           % of the wiper registers. measured off the
-                           % clock rather than the datasheet, and the term
-                           % that made the last estimate too low.
+BOARD_OVERHEAD = 0.08;     % s of USB round trips per state, measured off
+                           % the clock. omitting it made the last estimate
+                           % 3x too low.
 RC_TAU_COUNT  = 7;         % time constants. e^-7 is 0.09%.
-C_LOAD        = 300e-12;   % F, dominated by the leads and the meter
-                           % input.
-CELL_SETTLE   = 0.020;     % s of flat hold for the cell, on top of the
-                           % RC term. a floor under the measurement below
-                           % rather than a substitute for it.
-MEASURE_SETTLE = true;     % watch the cell settle at the slowest state
-                           % before the run and set its capacitance from
-                           % what that takes. the alternative is guessing
-                           % C_LOAD for a junction nobody has characterised,
-                           % and guessing low bends the curve: an
-                           % under-settled point reads a current that has
-                           % not finished falling, worst where R is
-                           % largest, which is a systematic tilt across the
-                           % sweep rather than noise.
+C_LOAD        = 300e-12;   % F, dominated by leads and meter input
+CELL_SETTLE   = 0.020;     % s of flat hold for the cell, on top of the RC
+MEASURE_SETTLE = true;     % measure the cell's settling at the slowest
+                           % state and set C_LOAD from it. guessing low
+                           % tilts the whole curve, worst where R is
+                           % largest, rather than adding noise.
 
-CSV_CHUNK     = 64;        % states written to disk at a time. writetable
-                           % reopens the file per call, so a row at a time
-                           % is far too slow and the whole run at the end
-                           % loses everything on an abort.
-                           % unmeasured, and the term that could actually
-                           % matter. to find it: park at OPEN, take 50
-                           % readings and see where they stop moving.
+CSV_CHUNK     = 64;        % states per disk write. writetable reopens the
+                           % file per call, so a row at a time is too slow
+                           % and one write at the end loses an abort.
 
 %% =====================================================================
 %  Run
@@ -469,11 +354,6 @@ cfg.Adapt = struct( ...
     'MaxPoints',  ADAPT_MAX_POINTS, ...
     'MaxRounds',  ADAPT_MAX_ROUNDS);
 
-% Each meter gets one spec holding everything about it: its profile, where
-% it lives, which range list applies to the function it will be asked for,
-% and how long a conversion takes. That is what travels down to the bus
-% functions, so nothing below this line has to know which of the three
-% meters it is holding, and the voltmeter and the ammeter can differ.
 cfg.Dmm = struct( ...
     'Enabled',     DMM_ENABLED, ...
     'Timeout',     DMM_TIMEOUT, ...
@@ -532,8 +412,7 @@ function runPlanOnly(cfg)
 end
 
 function runBoardCheck(cfg)
-% Arduino and PCB only, so SPI and the relays can be proved with no cell
-% and no meters in the way.
+% Arduino and PCB only. No cell, no meters.
 
     plan  = buildSweepPlan(cfg);
     board = connectBoard(cfg);
@@ -564,20 +443,11 @@ function runBoardCheck(cfg)
 end
 
 function runRamp(cfg)
-% Board only, for watching the load change on a handheld meter clipped
-% across J1 and J3 with no cell in the loop. Same states runBoardCheck
-% walks, held long enough to read.
+% Board only, handheld meter across J1 and J3, no cell.
 %
-% The plan is already sorted by resistance, so stepping through it evenly
-% climbs from the SHORT contact to the 470 kohm OPEN path without going
-% back on itself. Relays click on the way, which is part of what is being
-% checked.
-%
-% The printed ohms are the resistance model, not a measurement. R_WIPER is
-% the 155 ohm measured on board 2 and R_AB is +/-20%, so a meter that
-% disagrees at the low end is the model's tolerance rather than the board
-% being wrong. A disagreement larger than that on a different board is
-% worth keeping: it is what R_WIPER should be set to for that one.
+% Printed ohms are the model, not a measurement. R_AB is +/-20%, so a
+% disagreement at the low end is the model's tolerance. A larger one on a
+% different board is what R_WIPER should be set to for that board.
 
     plan  = buildSweepPlan(cfg);
     board = connectBoard(cfg);
@@ -607,8 +477,8 @@ function runRamp(cfg)
         else
             gap = sprintf("   step +%8.1f", jumps(n));
         end
-        % Printed before the state is applied, and flushed, so the console
-        % says what is coming rather than what has already been and gone.
+        % Printed and flushed before the state is applied, so the console
+        % says what is coming.
         fprintf("  [%4d/%4d] %-5s  U1=%3d  U2=%3d  ~%9.1f ohm%s\n", ...
             k, numel(plan), plan(k).Mode, plan(k).Code1, plan(k).Code2, ...
             plan(k).Resistance, gap);
@@ -622,24 +492,16 @@ function runRamp(cfg)
 end
 
 function runWiperCheck(cfg)
-% Board only. Wiper resistance measured by difference, which is the only
-% way to get it off a handheld: every reading shares the same probes,
-% jacks and traces, so subtracting two of them cancels all of that.
-%
-% Writing s for the ladder step and taking FULL at a code sum of n, which
-% splits as U1 = n and U2 = 0:
+% Board only. Wiper resistance by difference, which cancels the probes,
+% jacks and traces every reading shares. With s the ladder step:
 %
 %   SHORT   = K2
 %   LOW(n)  = K1 + Rw1 + n*s + K3
 %   FULL(n) = K1 + Rw1 + n*s + Rw2
 %
-% so LOW(0) - SHORT is Rw1 and FULL(n) - LOW(n) is Rw2, both to within a
-% reed contact, which is 0.150 ohm. Neither difference contains the leads,
-% the jacks or K1, so a bad probe offset does not reach the answer.
-%
-% Repeating across codes is the check that matters. Rw2 is a switch, not a
-% resistor, so the same number should come back at every code. A
-% difference that tracks the code is R_AB being wrong instead.
+% so LOW(0) - SHORT is Rw1 and FULL(n) - LOW(n) is Rw2. Rw2 is a switch,
+% so the same number should come back at every code; one that tracks the
+% code is R_AB being wrong instead.
 
     plan  = buildSweepPlan(cfg);
     board = connectBoard(cfg);
@@ -656,8 +518,7 @@ function runWiperCheck(cfg)
     for k = 1:numel(cfg.WiperCodes)
         n = cfg.WiperCodes(k);
         % LOW runs one pot, so it stops at 255. Past that a FULL row stands
-        % alone and every further step is U2 moving on its own, which is
-        % the only way to see U2 without a probe.
+        % alone and every further step is U2 moving on its own.
         if n <= cfg.WiperSteps
             idx(end + 1) = findState(plan, "LOW", n, cfg);   %#ok<AGROW>
         end
@@ -686,19 +547,13 @@ function runWiperCheck(cfg)
 end
 
 function runVerify(cfg)
-% Board only, for deciding whether a freshly assembled board is sound.
-% Seven holds that between them touch both chips over SPI, all three
-% relays, both ladders and R1. Nothing else on the board is load bearing.
+% Board only. Seven holds covering both chips over SPI, all three relays,
+% both ladders and R1. Pass conditions are differences and orders of
+% magnitude, so a handheld's tens of ohms of lead offset does not matter.
 %
-% The pass conditions are comparisons rather than absolute numbers. A
-% handheld carries its leads, its clips and both jacks in every reading,
-% which is tens of ohms and drifts, and every check below is a difference
-% or an order of magnitude, so none of them notice.
-%
-% Two holds are written straight to the pots rather than taken from the
-% plan. LOW always carries a zero second code in a sweep, so no planned
-% state drives U2 while K3 is meant to be shorting it out, which is
-% exactly the case that catches a relay that never operates.
+% Holds 6 and 7 are written straight to the pots: no planned state drives
+% U2 while K3 is meant to short it out, which is what catches a K3 that
+% never operates.
 
     board = connectBoard(cfg);
     guard = onCleanup(@() quietly(@() enterSafeState(board)));
@@ -748,26 +603,17 @@ function h = verifyHold(mode, code1, code2, proves)
 end
 
 function runOhmsSweep(cfg)
-% Board and one meter, on ohms across J1 and J3 and with no cell in the
-% loop. Every state in the sweep is visited once and the
-% meter reads the load directly, so the resistance comes off an instrument
-% instead of off the model.
+% Board and one meter on ohms across J1 and J3, no cell. What "ramp" does
+% without a human copying numbers down. A constant offset of a few ohms
+% across every point is the wiring, not the board.
 %
-% This does what "ramp" does without a human copying numbers off a
-% handheld, which is the only reason it needs a meter at all. The reading
-% carries the leads, the jacks and the traces the same way a handheld does,
-% so a constant offset of a few ohms across every point is the wiring and
-% not the board.
-%
-% One meter, so DMM_ENABLED stays out of it: that flag says whether the
-% pair the sweep needs is attached, and this mode needs neither of them in
-% particular.
+% DMM_ENABLED stays out of it: that flag is about the pair the sweep needs.
 
     plan  = buildSweepPlan(cfg);
 
-    % Two guards rather than one, because an onCleanup captures what exists
-    % when it is built and the meter is opened second. A meter that will not
-    % open then still leaves the board guarded.
+    % Two guards, because an onCleanup captures what exists when it is
+    % built and the meter opens second. A meter that will not open still
+    % leaves the board guarded.
     board      = connectBoard(cfg);
     boardGuard = onCleanup(@() quietly(@() enterSafeState(board)));
     meter      = openMeter(cfg.Dmm.R, "ohms");
@@ -828,9 +674,8 @@ function runOhmsSweep(cfg)
 end
 
 function [ohms, fault] = readOhms(meter)
-% One meter, so there is nothing to overlap and this is the plain trigger
-% and collect. A timeout comes back NaN and is counted rather than thrown,
-% the same way the sweep treats a dropped point.
+% A timeout comes back NaN and is counted rather than thrown, the same way
+% the sweep treats a dropped point.
 
     ohms  = NaN;
     fault = false;
@@ -845,11 +690,8 @@ function [ohms, fault] = readOhms(meter)
 end
 
 function saveOhmsRun(cfg, plan, measured, stamps)
-% CSV and plot share a stamped base name, so the two halves of one run stay
-% together and a later run cannot overwrite either.
-%
-% The figure is drawn either way. WRITE_CSV decides what reaches the disk,
-% and a mode whose whole output is a plot should not lose the plot as well.
+% CSV and plot share a stamped base name, so a later run cannot overwrite
+% either. The figure is drawn whether or not WRITE_CSV is set.
 
     if ~cfg.Out.WriteCsv
         plotOhmsRun(plan, measured, "");
@@ -882,30 +724,13 @@ function saveOhmsRun(cfg, plan, measured, stamps)
 end
 
 function plotOhmsRun(plan, measured, path)
-% Linear axes, with the model plotted alongside because the interesting
-% part is where the two part company.
+% Lower axes is a ratio, not a difference: the SHORT state models at
+% 0.150 ohm and R_AB's 20% at the top is tens of kohm, so only a ratio
+% holds the whole range at once. 1 is agreement.
 %
-% The sweep spans five decades, so a linear upper axes is set by the top of
-% the range and everything below a kilohm sits on the x axis. The lower
-% axes is what carries the bottom of the sweep. It is the ratio rather than
-% a difference or a percentage because both of those are dominated by one
-% end: the SHORT state models at 0.150 ohm, so any offset at all is
-% thousands of a percent there, and R_AB's 20% at the top is tens of kohm.
-% A ratio holds the whole range at once, and 1 is agreement.
-%
-% Two endpoints are left off the axes because each one sets a scale that
-% hides the other 767 states. OPEN comes off both: it is the 470 kohm
-% resistor rather than the ladders, and forty times the largest ladder
-% state. SHORT comes off the ratio axes only: it models at 0.150 ohm, so
-% the probe path alone puts its ratio near 3 while every other state sits
-% within a percent of 1.
-%
-% Both stay in the CSV, and the labels say what is missing. This is a
+% OPEN is off both axes and SHORT off the ratio axes, because each sets a
+% scale that hides the other 767 states. Both stay in the CSV; this is a
 % choice about the axes, not about what gets measured.
-%
-% Nothing else is clipped or blanked. A linear axes draws a zero or
-% negative reading where a log axes would have dropped it, so the count
-% below names only what the meter did not return at all.
 
     model = [plan.Resistance]';
     index = (1:numel(plan))';
@@ -960,8 +785,8 @@ function plotOhmsRun(plan, measured, path)
 end
 
 function k = findState(plan, mode, code, cfg)
-% Pulled out of the plan rather than rebuilt, so this mode cannot drift
-% away from the resistance model the sweep uses.
+% Pulled out of the plan rather than rebuilt, so this cannot drift away
+% from the model the sweep uses.
 
     switch mode
         case "SHORT"
@@ -981,8 +806,7 @@ function k = findState(plan, mode, code, cfg)
 end
 
 function runMeterCheck(cfg)
-% Meters only, so the command dialect and the wiring can be checked before
-% a sweep depends on them.
+% Meters only. Checks dialect and wiring before a sweep depends on them.
 
     if ~cfg.Dmm.Enabled
         error("PVLoad:MetersDisabled", ...
@@ -1008,23 +832,21 @@ function runMeterCheck(cfg)
 end
 
 function results = runSweepAll(cfg)
-% One sweep at whatever illumination the bench happens to be under. The
-% lamp is set by hand and the script never touches it, so a family of
-% curves is several runs of this rather than one run of several levels.
-% RUN_TAG is the only record of which was which.
+% One sweep at whatever illumination the bench is under. The lamp is set
+% by hand, so a family of curves is several runs of this and RUN_TAG is
+% the only record of which was which.
 
-    % The sweep refines into the gaps of its coarse pass, so it works
-    % against the full plan whatever CODE_STEP says.
+    % Refinement works into the gaps of the coarse pass, so the full plan
+    % is needed whatever CODE_STEP says.
     plan = buildMasterPlan(cfg);
     reportPlan(cfg, plan);
 
     board = connectBoard(cfg);
     fprintf("Board connected.\n");
 
-    % runExperiment's guard is built from the board and the meters
-    % together, so it does not exist while the meters are coming up. A
-    % meter that will not open would otherwise leave the board
-    % energised behind nothing.
+    % runExperiment's guard covers board and meters together, so it does
+    % not exist while the meters are coming up. Without this catch, a
+    % meter that will not open leaves the board energised behind nothing.
     try
         meas = connectMeters(cfg);
         [cfg, meas] = probeRanges(board, meas, cfg, plan);
@@ -1041,8 +863,8 @@ function results = runSweepAll(cfg)
         fprintf("Readings: %s\n", log.Readings);
     end
 
-    % After the run, and off the measured columns only. Nothing here can
-    % reach back into what was swept.
+    % Off the measured columns only. Nothing here reaches back into what
+    % was swept.
     stats = summariseCurve(results, cfg);
     reportCurve(stats);
     plotCurve(results, stats, figurePath(log));
@@ -1053,9 +875,8 @@ end
 %  =====================================================================
 
 function path = figurePath(log)
-% The figure sits beside the CSV under the same stamped name, so the two
-% halves of one run cannot drift apart. No CSV means no path, and the
-% figure is drawn on screen only.
+% Figure sits beside the CSV under the same stamped name. No CSV means no
+% path, and the figure is drawn on screen only.
 
     path = "";
     if strlength(log.Readings) > 0
@@ -1064,24 +885,15 @@ function path = figurePath(log)
 end
 
 function stats = summariseCurve(results, cfg)
-% The numbers a cell is judged by, off the measured columns and nothing
-% else.
+% Magnitudes throughout: sign depends on which way the leads went on. The
+% CSV keeps the signs the meters reported.
 %
-% Magnitudes throughout. Which sign the current and the voltage carry
-% depends on which way the leads went on, and a curve that lands in the
-% fourth quadrant is a wiring choice rather than a different cell. Papers
-% plot the first quadrant. The CSV keeps the signs the meters reported.
+% Isc and Voc come from the SHORT and OPEN states, falling back to the
+% extremes of what was measured so a partial run stays useful; the flags
+% say which happened.
 %
-% Isc and Voc are read from the two endpoint states rather than from the
-% extremes of the sweep, because that is what those states are for: SHORT
-% is the cell into a reed contact and OPEN is the cell into 470 kohm.
-% Neither is a true endpoint, and the second is the weaker: the 470 kohm
-% path draws a fixed current, so under weak light the OPEN state stops
-% being an open circuit. Falling back to the extreme of what was measured
-% keeps a partial run useful, and the flags say which happened.
-%
-% Efficiency is deliberately absent. It needs the incident optical power,
-% and the software neither sets the illumination nor knows it.
+% Efficiency is absent: it needs the incident optical power, which the
+% software neither sets nor knows.
 
     v  = abs(results.VoltageV);
     i  = abs(results.CurrentA);
@@ -1125,19 +937,15 @@ function stats = summariseCurve(results, cfg)
         stats.FillFactor = stats.Pmax / (stats.Voc * stats.Isc);
     end
 
-    % Whether the two things the numbers above assume are actually true,
-    % decided from the measurement rather than from the cell model.
+    % Whether the numbers above hold, decided from the measurement.
     %
-    % The OPEN state is 470 kohm, not an open circuit. That path draws a
-    % current set by Voc alone while Isc scales with the light, so under
-    % weak illumination it stops being negligible and the voltage there is
-    % a floor under Voc rather than Voc. Fill factor inherits the error.
+    % OPEN is 470 kohm, not an open circuit: that path draws a current set
+    % by Voc while Isc scales with the light, so under weak illumination
+    % the voltage there is a floor under Voc and FF inherits the error.
     %
-    % The ladder stops at 10.3 kohm. A cell whose knee needs more than
-    % that never leaves its current-source region, and the largest power
-    % in the sweep is then the last point of the ladder rather than a
-    % maximum. Reporting that as Pmax without saying so would be the
-    % worst of the three, because it looks like an answer.
+    % The ladder stops at 10.3 kohm. A cell whose knee needs more never
+    % leaves its current-source region, and the largest power in the sweep
+    % is then the last ladder point rather than a maximum.
 
     if ~isempty(open) && stats.Isc > 0
         stats.OpenFraction = i(open) / stats.Isc;
@@ -1152,7 +960,6 @@ function stats = summariseCurve(results, cfg)
 end
 
 function reportCurve(stats)
-% The console gets what the figure carries, in the order a paper lists it.
 
     if stats.Points == 0
         fprintf("No state returned a reading, so there is no curve.\n");
@@ -1161,8 +968,8 @@ function reportCurve(stats)
 
     guessed = "   (no SHORT state, largest measured)";
 
-    % Console and figure carry the same numbers in the same units, so an
-    % area given for one cannot leave the other reporting the other thing.
+    % Same units as the figure, so an area given for one cannot leave the
+    % other reporting the other thing.
     if stats.AreaCm2 > 0
         scale = 1e3 / stats.AreaCm2;
         fprintf("\nJsc  %8.3f mA/cm2%s\n", scale * stats.Isc, ...
@@ -1212,20 +1019,13 @@ function reportCurve(stats)
 end
 
 function plotCurve(results, stats, path)
-% Laid out the way a cell measurement is published: first quadrant, one
-% panel, voltage across, current up the left axis and power up the right,
-% the maximum power point marked on both and the four numbers in a box.
+% Current density where CELL_AREA_CM2 gives the area, absolute current
+% where it does not.
 %
-% Current density where CELL_AREA_CM2 gives the area and absolute current
-% where it does not. A paper reports mA/cm2; a bench with an
-% uncharacterised receiver has no area to divide by, and inventing one
-% would be worse than labelling the axis honestly.
-%
-% Sorted by voltage before the line is drawn. The sweep is ordered by the
-% resistance model, and that model is allowed to be wrong about the order,
-% so joining points in sweep order could draw a line the measurement does
-% not support. Markers stay on so the sampling is visible: the ladder is
-% uniform in resistance, which crowds the points hard toward Voc.
+% Sorted by voltage before the line is drawn: the sweep is ordered by the
+% resistance model, which is allowed to be wrong about the order, so
+% joining points in sweep order could draw a line the measurement does not
+% support.
 
     if stats.Points == 0
         return
@@ -1246,15 +1046,10 @@ function plotCurve(results, stats, path)
     i = scale * abs(results.CurrentA);
     p = scale * abs(results.VoltageV .* results.CurrentA);
 
-    % The three circuit configurations are drawn apart. SHORT is the cell
-    % into a reed contact and OPEN is the cell into 470 kohm; between the
-    % top of the ladder and that 470 kohm the board has no states at all,
-    % so a line joining them would draw a straight run of curve through a
-    % region nothing was measured in. On a cell whose knee falls in that
-    % gap, which is any cell too dim for the ladder to load, that line is
-    % the most confident-looking part of the figure and the only part with
-    % no data under it. The ladder gets the line; the endpoints get
-    % markers of their own.
+    % Ladder gets the line, endpoints get their own markers. The board has
+    % no states between the top of the ladder and the 470 kohm OPEN path,
+    % so a line joining them would draw curve through a region nothing was
+    % measured in — exactly where a dim cell's knee falls.
 
     ladder = results.Mode ~= "SHORT" & results.Mode ~= "OPEN";
     [vl, order] = sort(v(ladder));
@@ -1312,11 +1107,8 @@ function plotCurve(results, stats, path)
         first = sprintf("I_{sc} = %.3f mA", 1e3 * stats.Isc);
     end
 
-    % Placed in data coordinates rather than on the figure, so it lands in
-    % the same empty region whatever the cell turns out to do. That region
-    % is the left of the plot below the plateau: the I-V runs flat along
-    % the top until the knee, the P-V climbs from the origin and is still
-    % low there, and the legend sits under it in the corner.
+    % Data coordinates, so the box lands in the same empty region below
+    % the plateau whatever the cell does.
     text(ax, 0.04 * stats.Voc, 0.74 * 1.1 * scale * stats.Isc, ...
         {first, ...
          sprintf(ternary(stats.VocIsFloor, ...
@@ -1338,10 +1130,8 @@ end
 %  =====================================================================
 
 function plan = buildSweepPlan(cfg)
-% Every state the board can produce, ordered by the resistance model.
-% That model orders and labels only, it never decides what gets measured.
-% Uniqueness is structural: one state per LOW code, one per FULL code-sum,
-% one SHORT, one OPEN. 769 total.
+% Every state the board can produce, ordered by the resistance model. That
+% model orders and labels only, it never decides what gets measured.
 
     states = enumerateStates(cfg);
 
@@ -1351,17 +1141,15 @@ function plan = buildSweepPlan(cfg)
 end
 
 function master = buildMasterPlan(cfg)
-% Every state the board can make, whatever CODE_STEP says. The adaptive
-% sweep thins for itself and refines into the gaps, so it needs the full
-% 769 to choose from.
+% All 769 states whatever CODE_STEP says: the adaptive sweep thins for
+% itself and refines into the gaps.
 
     cfg.CodeStep = 1;
     master = buildSweepPlan(cfg);
 end
 
 function idx = coarseIndices(master, cfg)
-% The states the adaptive coarse pass measures: the thinning CODE_STEP
-% does, by wiper code and never by resistance, plus both endpoints.
+% Thinned by wiper code, never by resistance, plus both endpoints.
 
     step = cfg.Adapt.CoarseStep;
     mode = [master.Mode];
@@ -1415,7 +1203,6 @@ end
 %  =====================================================================
 
 function assertConfig(cfg)
-% Catches a mistyped config block before anything is energised.
 
     mustBeOneOf(cfg.Run, ...
         ["plan" "board" "ramp" "wiper" "verify" "ohms" "meters" ...
@@ -1480,26 +1267,17 @@ function assertConfig(cfg)
             "DMM_TIMEOUT is %g s but one conversion takes %g s.", ...
             D.Timeout, max(D.V.Conversion, D.I.Conversion));
     end
-    % Checked per meter, and not gated on D.Enabled, for the same reason
-    % DMM_R_RANGE is not: RUN "ohms" opens one meter and configures it
-    % through the same path. An NPLC the meter does not have is rejected at
-    % the bus with nothing to say which of these two numbers caused it.
     assertNplc(D.V, D.LineHz);
     assertNplc(D.I, D.LineHz);
     assertNplc(D.R, D.LineHz);
 
     if D.Enabled && D.V.Range > 0
-        % Every range is named, so one that does not exist is a config
-        % error here rather than something the meter sorts out later. A
-        % zero means the range is sized from VOC_FULL or ISC_FULL instead,
-        % which is what keeps one configuration working on any of them.
         rangeCode(D.V.Range, D.V.Ranges, "DMM_V_RANGE", D.V.Label);
     end
     if D.Enabled && D.I.Range > 0
         rangeCode(D.I.Range, D.I.Ranges, "DMM_I_RANGE", D.I.Label);
     end
-    % Not gated on D.Enabled: RUN "ohms" uses one meter and that flag is
-    % about the pair the sweep needs.
+    % RUN "ohms" uses one meter; not gated on D.Enabled.
     if D.R.Range > 0
         rangeCode(D.R.Range, D.R.Ranges, "DMM_R_RANGE", D.R.Label);
     end
@@ -1533,8 +1311,6 @@ function assertConfig(cfg)
 end
 
 function assertNplc(spec, lineHz)
-% DMM_NPLC and DMM_LINE_HZ are shared, but only a SCPI meter reads them, so
-% the check runs once per meter and stays quiet for the Keithleys.
 
     if spec.Ddc.Dialect ~= "scpi"
         return
@@ -1561,8 +1337,6 @@ function mustBeOneOf(value, allowed, name)
 end
 
 function path = resolvePath(relative)
-% Resolved against this file's folder, so the current directory does not
-% matter.
     if isfile(relative) || isfolder(relative)
         path = char(relative);
         return
@@ -1572,7 +1346,6 @@ function path = resolvePath(relative)
 end
 
 function reportPlan(cfg, plan)
-% Everything needed to decide whether to let it run, before anything opens.
 
     perPoint = estimatePointTime(cfg, plan);
     nCoarse  = numel(coarseIndices(plan, cfg));
@@ -1583,9 +1356,6 @@ function reportPlan(cfg, plan)
     fprintf("Refinement then adds states where the measured curve " + ...
         "bends, to at most %d.\n", cap);
 
-    % Whether the cell is described here or found at the start of the run.
-    % The OPEN state check that used to live here has moved to probeRanges,
-    % where it is made against a measurement instead of an estimate.
     if cfg.Cell.IscFull > 0 || cfg.Cell.VocFull > 0
         fprintf("Cell as configured: Isc %g mA, Voc %g V.\n", ...
             1e3 * cfg.Cell.IscFull, cfg.Cell.VocFull);
@@ -1651,8 +1421,8 @@ function board = connectBoard(cfg)
 end
 
 function assertSpiPins(a, cfg)
-% SPI pins are fixed by the hardware peripheral, so an edited pin map must
-% fail loudly instead of silently describing the wrong wiring.
+% SPI pins are fixed by the hardware peripheral; an edited pin map must
+% fail loudly rather than silently describe the wrong wiring.
 
     switch string(a.Board)
         case {"Uno", "Nano3", "ProMini328_5V", "ProMini328_3V"}
@@ -1714,9 +1484,7 @@ function writeWiper(dev, code)
 end
 
 function code = readWiper(dev)
-% Read command 0x0C. The answer clocks out in the second byte. The first
-% byte's status bits are not decoded, because comparing the code already
-% catches every failure they would report.
+% Read command 0x0C. The answer clocks out in the second byte.
 
     out  = writeRead(dev, uint8([12, 0]), 'uint8');
     code = double(out(2));
@@ -1742,9 +1510,9 @@ function setWipers(board, code1, code2)
 end
 
 function selfTestPotentiometers(board)
-% The only check that the SPI link is bidirectional and that each chip
-% select reaches the chip it should. HARDWARE.md section 6: a bad supply
-% sequence silently forces the wiper to mid-scale.
+% The only check that SPI is bidirectional and that each chip select
+% reaches its own chip. HARDWARE.md section 6: a bad supply sequence
+% silently forces the wiper to mid-scale.
 
     probes = [0, 85, 170, 255];
     chips  = {'U1', 'U2'};
@@ -1777,7 +1545,6 @@ function applyState(board, state, settle)
 end
 
 function enterSafeState(board)
-% Also where the board lands on an Arduino reset, entered deliberately.
     setMode(board, "OPEN");
     setWipers(board, 0, 0);
     pause(board.SafeSettle);
@@ -1789,12 +1556,10 @@ end
 %  =====================================================================
 
 function meas = connectMeters(cfg)
-% Every port opened here is closed again unless all of them come up. The
+% Every port opened here is closed again unless all of them come up: the
 % caller's guard is built from the returned struct, so it does not exist
-% while this is running, and a meter that opens and then fails to identify
-% would otherwise be left to whenever MATLAB gets around to collecting it.
-% Closing on the way out makes the next run's open a fresh session rather
-% than a race against the last one.
+% while this runs. Closing on the way out makes the next run's open a
+% fresh session rather than a race against the last one.
 
     meas = struct('Enabled', false, 'V', [], 'I', [], ...
                   'VId', "", 'IId', "", 'Faults', 0, 'Cfg', cfg.Dmm, ...
@@ -1817,11 +1582,9 @@ function meas = connectMeters(cfg)
         fprintf("Voltage meter: %s\n", meas.VId);
         fprintf("Current meter: %s\n", meas.IId);
 
-        % Both ranges are settled here and never touched again. A range
-        % change costs a fresh configuration, and 769 of those would be
-        % absurd; the range that fits is already known from ISC_FULL and
-        % VOC_FULL. Doing it twice is worse than redundant on a Keithley,
-        % where each configuration leaves another triggered reading behind.
+        % Configured once. On a Keithley each configuration leaves another
+        % triggered reading behind, so doing it twice is worse than
+        % redundant.
         configureMeter(meas.V, "voltage", pickVoltageRange(cfg));
         configureMeter(meas.I, "current", ...
                        pickCurrentRange(cfg.Cell.IscFull, cfg));
@@ -1834,9 +1597,8 @@ function meas = connectMeters(cfg)
 end
 
 function spec = meterSpec(profile, address, range, ranges, zeroCorrect, timeout)
-% Everything one meter needs, in one place. The range list is the one for
-% the function this meter will be asked for and nothing else, so a caller
-% holding a spec never has to work out which of the three lists applies.
+% Ranges is the list for the function this meter will be asked for, so a
+% caller holding a spec never picks between the three.
 
     spec = struct( ...
         'Ddc',         profile, ...
@@ -1852,8 +1614,8 @@ function spec = meterSpec(profile, address, range, ranges, zeroCorrect, timeout)
 end
 
 function profile = selectProfile(profiles, model, name)
-% The profiles carry different fields, so they arrive as a cell array and
-% are matched on Model rather than indexed by position.
+% Profiles carry different fields, so they arrive as a cell array and are
+% matched on Model rather than indexed by position.
 
     for k = 1:numel(profiles)
         if profiles{k}.Model == model
@@ -1872,18 +1634,10 @@ function profile = selectProfile(profiles, model, name)
 end
 
 function m = openMeter(spec, role)
-% The one place a transport is chosen. On a 196 there is only the one: the
-% rear panel carries an IEEE-488 connector and nothing else. The 34401A
-% also has an RS-232 port, which VISA reaches as an ASRL resource, so an
-% address is not necessarily GPIB any more.
-%
-% The open port and its profile leave here together. Everything below takes
-% that pair rather than a port and a bench-wide model, which is what lets
-% one sweep run two different instruments.
-%
-% The terminator comes from the profile because the dialects disagree about
-% it. A Keithley reply ends CR LF; a 34401A ends LF alone, and waiting on a
-% pair that never arrives is a timeout on every read.
+% The terminator comes from the profile: a Keithley reply ends CR LF, a
+% 34401A ends LF alone, and waiting on a pair that never arrives is a
+% timeout on every read. The 34401A also has RS-232, reached as an ASRL
+% resource, so an address is not necessarily GPIB.
 
     m = spec;
     D = spec.Ddc;
@@ -1892,16 +1646,14 @@ function m = openMeter(spec, role)
         m.Port = visadev(spec.Address);
         m.Port.Timeout = spec.Timeout;
         configureTerminator(m.Port, D.ReadTerm, D.WriteTerm);
-        % A meter can be mid-reading when a fresh session opens, and the
-        % first query then waits on a terminator that has already gone past.
-        % Without this every first read times out.
+        % A meter can be mid-reading when a fresh session opens; without
+        % this the first query waits on a terminator already gone past.
         flush(m.Port, "input");
         if D.Dialect == "scpi"
             if startsWith(upper(string(spec.Address)), "ASRL")
-                % Over RS-232 the meter comes up in local and ignores the
-                % bus until this arrives. Over GPIB the addressing does it
-                % and the command is not one the meter accepts, so it is
-                % sent only here.
+                % Over RS-232 the meter ignores the bus until this
+                % arrives. Over GPIB the addressing does it and the meter
+                % does not accept the command, so it is sent only here.
                 writeline(m.Port, "SYST:REM");
             end
         else
@@ -1916,40 +1668,28 @@ function m = openMeter(spec, role)
 end
 
 function primeDdc(m)
-% visadev sends *IDN? to whatever it opens and offers no way to turn that
-% off (MathWorks support, MATLAB Answers 2118301). The 196 predates SCPI:
-% none of those characters execute without a trailing X, so the fragment
-% sits in its parser and the next real command is concatenated onto it.
-% The X that command ends with then executes the combined garbage. That is
-% the whole family of session-open faults this bench measured: the first
-% command that vanishes, the IDDCO that latches with no invalid command
-% ever sent, and both surfacing an exchange or two late. The error word is
-% therefore unreliable near an open, which is why setup verification reads
-% the machine word instead (ddcVerifySetup).
+% visadev sends *IDN? to whatever it opens and cannot be told not to
+% (MATLAB Answers 2118301). The 196 predates SCPI and executes nothing
+% without a trailing X, so that fragment strands in its parser and the
+% next real command is concatenated onto it. Hence the session-open
+% faults: a first command that vanishes, an IDDCO latched with no invalid
+% command sent, both surfacing an exchange late. The error word is
+% unreliable near an open, so ddcVerifySetup reads the machine word.
 %
-% The bare X below is the terminator visadev never sent. It executes the
-% stranded fragment at a time of our choosing, as the only command in the
-% parser, and whatever that latches is drained here before anything is
-% asked in earnest.
+% The bare X below is the terminator visadev never sent, executing the
+% fragment at a time of our choosing and draining what it latches.
 %
-% T5 must land before the first question because power-on is T0,
-% continuous on talk, table 3-8: being addressed to talk is itself a
-% trigger, so every read manufactures a fresh reading and a query comes
-% back "NDCI-00.00079E-3" instead of its answer. A drain that keeps
-% answering with readings or nothing means the T5 was itself swallowed, so
-% the attempt loop sends it again. One write per attempt: two writes in
-% quick succession into a fresh session get mangled into one string,
-% measured here as an IDDCO with every individual command valid.
+% T5 must land before the first question: power-on is T0, continuous on
+% talk (table 3-8), so being addressed to talk is itself a trigger and
+% every query comes back as a reading. One write per attempt — two writes
+% into a fresh session get mangled into one string.
 
     pause(0.5);
     ddcTell(m.Port, "");
     pause(0.3);
-    % The fragment has a D in it, the 196's display-message command, so
-    % executing it paints the tail of *IDN? onto the front panel, where it
-    % reads n7. A painted message stays until a bare D restores the
-    % display, so one is sent every open. The TRIG ERROR the display
-    % flashes at the same moment is the same execution and just as
-    % cosmetic; it clears when the first real reading lands.
+    % The fragment contains a D, the display-message command, so it paints
+    % the tail of *IDN? on the front panel (reads "n7"). A bare D restores
+    % the display. The TRIG ERROR flashed alongside is equally cosmetic.
     ddcTell(m.Port, "D");
     pause(0.3);
     flush(m.Port, "input");
@@ -1980,7 +1720,6 @@ function primeDdc(m)
 end
 
 function text = availableResources()
-% Put whatever the machine can see into the failure message.
 
     try
         found = visadevlist;
@@ -1996,16 +1735,10 @@ function text = availableResources()
 end
 
 function word = identifyMeter(m, role)
-% The 196 has no *IDN?. Its U0 query returns the machine status word, which
-% opens with the model number and then spells out the front panel setup, so
-% one query identifies the instrument and reports its state. The 34401A
-% does have *IDN?, whose reply is maker, model, serial and firmware, so the
-% model sits in the middle rather than at the front.
-%
-% Either way the model check is what catches a DMM_*_MODEL naming one meter
-% while the address reaches the other. That matters more now the two need
-% not be the same instrument: the wrong profile would otherwise show up as
-% a range number meaning something different from what was intended.
+% The 196 has no *IDN?; its U0 machine word opens with the model number.
+% The 34401A's *IDN? puts the model in the middle. Either way this catches
+% a DMM_*_MODEL naming one meter while the address reaches the other,
+% which would otherwise show up as a range number meaning something else.
 
     D = m.Ddc;
 
@@ -2026,14 +1759,10 @@ function word = identifyMeter(m, role)
 end
 
 function configureMeter(m, role, range)
-% Function and range travel together in both dialects, for the same reason
-% in each: an R number means a different range in every function, and CONF
-% takes the two as one command. Then the setup is checked, each dialect its
-% own way: the 34401A by draining its error queue, the 196 by reading the
-% machine status word back and comparing digits, because visadev poisons
-% the 196's error word at every open (see primeDdc) and a latched phantom
-% bit can surface commands later. The machine word is the setup; the error
-% word is only history.
+% Function and range travel together: an R number means a different range
+% in every function, and CONF takes both as one command. The 196's setup
+% is checked against the machine word rather than the error word, which
+% visadev poisons at every open (primeDdc).
 
     if m.Ddc.Dialect == "scpi"
         scpiConfigure(m, role, range);
@@ -2041,16 +1770,14 @@ function configureMeter(m, role, range)
     else
         sent = ddcConfigure(m, role, range);
         ddcVerifySetup(m, role, sent);
-        % The queries above each triggered one more conversion. Left in
-        % the buffer it would become the sweep's first reading, and every
-        % point after it would carry the previous state's value: a curve
-        % shifted by one rather than an obviously broken one.
+        % The queries above each triggered another conversion. Left in the
+        % buffer it becomes the sweep's first reading and shifts the whole
+        % curve by one point, which does not look broken.
         flush(m.Port, "input");
     end
 end
 
 function name = rangeSetting(role)
-% Which Part 1 setting a rejected range came from, for the message.
 
     switch role
         case "voltage", name = "DMM_V_RANGE";
@@ -2074,10 +1801,8 @@ function sent = ddcConfigure(m, role, range)
     D  = m.Ddc;
     fn = functionFor(D, role);
 
-    % A range of zero means autorange. RUN "ohms" uses it for a sweep of
-    % five decades that no fixed range holds, and the probe that sizes the
-    % sweep's own ranges uses it for the two readings it takes before the
-    % range is known.
+    % Zero means autorange: RUN "ohms" spans five decades, and the probe
+    % reads before any range is known.
     if range <= 0
         command = fn + D.AutoRange;
     else
@@ -2094,13 +1819,10 @@ function sent = ddcConfigure(m, role, range)
 end
 
 function scpiConfigure(m, role, range)
-% One command per line, and the order is not cosmetic: CONF resets
-% integration time, autozero and input impedance to the defaults for the
-% function it selects, so everything that follows has to follow it.
-%
-% The error queue is cleared first so that the SYST:ERR? at the end of
-% configureMeter reports this setup rather than whatever the front panel
-% did before the script opened the port.
+% Order is not cosmetic: CONF resets integration time, autozero and input
+% impedance to the function's defaults, so everything else must follow it.
+% The error queue is cleared first so configureMeter's SYST:ERR? reports
+% this setup and not what the front panel did earlier.
 
     D    = m.Ddc;
     node = functionFor(D, role);
@@ -2135,15 +1857,10 @@ function scpiConfigure(m, role, range)
 end
 
 function assertMeterHappy(m, role)
-% Whatever a command the meter did not understand cost, it is cheaper to
-% find here than in the CSV. SYST:ERR? pops one entry off a queue and a
-% clean one reads +0. SCPI only; the 196's setup is checked against the
-% machine word in ddcVerifySetup, because its error word is not
-% trustworthy near a session open.
-%
-% The queue is drained rather than sampled. A setup that sends nine
-% commands can have several rejected, and popping one entry per run turns
-% bringing up a profile into one round trip per mistake.
+% SCPI only. The 196's setup is checked in ddcVerifySetup instead, its
+% error word not being trustworthy near a session open. The queue is
+% drained rather than sampled: a setup sends nine commands and several can
+% be rejected.
 
     faults = scpiErrorQueue(m);
     if isempty(faults)
@@ -2155,16 +1872,14 @@ function assertMeterHappy(m, role)
 end
 
 function ddcVerifySetup(m, role, sent)
-% The machine word is read back and every setting the setup string carried
-% is compared digit by digit, positions from the profile StatusMap. This
-% checks what the meter is actually in, not what it complained about,
-% which matters because a phantom IDDCO from the session open (see
-% primeDdc) can surface in the error word commands after the fact. A
-% setting the meter refused shows up here as a digit that did not move.
+% Compares the machine word digit by digit against what was sent,
+% positions from StatusMap. Checks what the meter is in, not what it
+% complained about, because a phantom IDDCO from the session open
+% (primeDdc) can surface in the error word commands later. A refused
+% setting shows up as a digit that did not move.
 %
-% R0, the ohms autorange, is skipped: under autorange the word reports
-% whichever range the meter has chosen, which is information rather than
-% disagreement.
+% R0, the ohms autorange, is skipped: the word then reports whichever
+% range the meter chose, which is information rather than disagreement.
 
     word  = ddcAskStatus(m, m.Ddc.Machine);
     state = extractAfter(word, m.Ddc.IdPrefix);
@@ -2193,10 +1908,8 @@ function ddcVerifySetup(m, role, sent)
 end
 
 function faults = scpiErrorQueue(m)
-% Pop until the queue reports empty. The 34401A holds 20 entries and
-% returns +0,"No error" once it is drained, so the loop is bounded twice
-% over; the counter is there for a meter that never says +0 rather than as
-% the real limit.
+% The 34401A holds 20 entries and returns +0 once drained; the counter is
+% there for a meter that never says +0.
 
     faults = strings(0, 1);
 
@@ -2210,12 +1923,10 @@ function faults = scpiErrorQueue(m)
 end
 
 function code = rangeCode(range, ranges, name, label)
-% On the Keithleys R1 is the most sensitive range of a function and they
-% climb by decades, so the R number is a position in the list, table 3-12.
-% The 34401A names the range as a number instead and has no use for the
-% position, but it still wants the same check: a range the instrument does
-% not have is a configuration error here rather than something the meter
-% quietly rounds up later.
+% On the Keithleys R1 is the most sensitive range and they climb by
+% decades, so the R number is a position in the list (table 3-12). The
+% 34401A names the range as a number but wants the same check: a range the
+% instrument does not have is an error here, not something it rounds up.
 
     code = find(abs(ranges - range) <= 1e-9 * ranges, 1);
     if isempty(code)
@@ -2226,14 +1937,8 @@ function code = rangeCode(range, ranges, name, label)
 end
 
 function range = pickCurrentRange(iscExpected, cfg)
-% Settled once per run, before the first state, and never touched again.
-% A range change costs a fresh configuration, and 769 of those would be
-% absurd.
-%
-% Autorange exists and is not used. A range hunt inside a settled point
-% spends conversions on the wrong range, and the answer it would arrive at
-% is already known from ISC_FULL. That number is the operator's estimate at
-% the illumination they set by hand; nothing here can see the lamp.
+% Sized once, before the first state. A range hunt inside a settled point
+% spends conversions on the wrong range.
 
     I = cfg.Dmm.I;
 
@@ -2255,13 +1960,10 @@ function range = pickCurrentRange(iscExpected, cfg)
 end
 
 function range = pickVoltageRange(cfg, vocSeen)
-% Sizing the range from a voltage rather than naming a number keeps one
-% configuration working on either meter, whose ranges do not line up: a
-% 9 V Voc lands on 30 V on a 196 and 10 V on a 34401A.
-%
-% The voltage is whatever the caller knows. VOC_FULL when someone pinned
-% it, what the OPEN state actually read when the probe measured it, and
-% nothing at all before either, which asks for autorange.
+% Sized from a voltage rather than a named number, so one configuration
+% works on either meter: a 9 V Voc lands on 30 V on a 196 and 10 V on a
+% 34401A. vocSeen is VOC_FULL if pinned, what OPEN read if probed, and
+% nothing before either, which asks for autorange.
 
     V = cfg.Dmm.V;
 
@@ -2278,10 +1980,9 @@ function range = pickVoltageRange(cfg, vocSeen)
         return
     end
 
-    % No headroom, unlike the ammeter. The OPEN state is the highest
-    % voltage the sweep reaches, so the measurement is already the maximum,
-    % and rounding a 9 V cell up past the 10 V range would cost the
-    % 34401A's high impedance input, which exists only below that.
+    % No headroom, unlike the ammeter: OPEN is already the highest voltage
+    % the sweep reaches, and rounding a 9 V cell past the 10 V range costs
+    % the 34401A's high impedance input, which exists only below that.
     fits = V.Ranges(V.Ranges >= vocSeen);
     if isempty(fits)
         range = max(V.Ranges);
@@ -2291,27 +1992,13 @@ function range = pickVoltageRange(cfg, vocSeen)
 end
 
 function [cfg, meas] = probeRanges(board, meas, cfg, plan)
-% Measures the two numbers the meters have to be sized from, instead of
-% being told them.
+% Measures the two numbers the meters are sized from instead of being told
+% them. OPEN is the largest voltage of the run and SHORT the largest
+% current, and every other state is one of those two with resistance
+% added, so two autoranged readings bound the whole run.
 %
-% Both are endpoints the sweep visits anyway. The largest voltage of the
-% run is the OPEN state, where the cell sits behind 470 kohm, and the
-% largest current is the SHORT state, where it sits behind a reed contact.
-% Nothing else in the sweep exceeds either, because every other state is
-% one of those two with resistance added. So two readings on autorange
-% bound the whole run, and the fixed ranges that follow are sized from the
-% cell in front of the meters rather than from a number typed in weeks
-% earlier at an illumination nobody recorded.
-%
-% This is what ISC_FULL and VOC_FULL used to be for. They remain, pinning
-% the range when a family of runs at different light should share one, and
-% a pinned range skips its half of the probe.
-%
-% Cost is two states and two reconfigurations, a few seconds against a
-% run of minutes. Autorange is what makes it possible and is also why it
-% is not used for the sweep itself: the hunt costs conversions at every
-% state that changes decade, which is the whole point of settling the
-% range once.
+% ISC_FULL and VOC_FULL pin the range instead when a family of runs at
+% different light should share one; a pinned range skips its half.
 
     if ~meas.Enabled
         return
@@ -2344,9 +2031,8 @@ function [cfg, meas] = probeRanges(board, meas, cfg, plan)
         fprintf("  SHORT %9.4f mA\n", 1e3 * isc);
     end
 
-    % Back to OPEN before anything else happens, which is the same rule the
-    % sweep runs under: a closed K2 across a lit cell is not a state to
-    % leave the board in while the meters are being reconfigured.
+    % A closed K2 across a lit cell is not a state to leave the board in
+    % while the meters are reconfigured.
     enterSafeState(board);
 
     meas.VOpenSeen = voc;
@@ -2360,27 +2046,22 @@ function [cfg, meas] = probeRanges(board, meas, cfg, plan)
     fprintf("  ranges %g V and %g mA, 20%% above what the cell showed.\n", ...
         vRange, 1e3 * iRange);
 
-    % From here the voltmeter follows the reading. The ammeter does not:
-    % the current is nearly flat across a sweep, so one range holds it,
-    % and the 196 has nothing below 300 uA to move to anyway.
+    % Both meters follow the reading from here.
     meas.VAdaptive = true;
     meas.VRangeNow = vRange;
     meas.VRanges   = meas.V.Ranges;
 
-    % The ammeter follows too. It was fixed on the argument that a cell's
-    % current is flat across a sweep, which is true of the cell and not of
-    % the bench: the run of 20260828_163338 climbed from 125 uA to 197 uA
-    % in fourteen minutes as the illumination drifted up, ran off the top
-    % of the range it had been pinned to, and aborted on six overflows.
-    % Nothing about that is the cell moving along its own curve.
+    % The ammeter was once pinned, on the argument that a cell's current is
+    % flat across a sweep. True of the cell, not of the bench: run
+    % 20260828_163338 drifted 125 uA to 197 uA in fourteen minutes as the
+    % illumination climbed, ran off the top of its range and aborted.
     meas.IAdaptive = true;
     meas.IRangeNow = iRange;
     meas.IRanges   = meas.I.Ranges;
 
     % The 470 kohm path draws a current fixed by Voc while Isc scales with
-    % the light, so under weak illumination the OPEN state stops being an
-    % open circuit. Now measured rather than estimated, and worth saying
-    % before an hour of sweeping rather than after.
+    % the light, so under weak illumination OPEN stops being an open
+    % circuit. Said before an hour of sweeping rather than after.
     fraction = (voc / cfg.ROpenPath) / isc;
     if fraction > 0.05
         warning("PVLoad:OpenPointWeak", ...
@@ -2397,28 +2078,15 @@ function [cfg, meas] = probeRanges(board, meas, cfg, plan)
 end
 
 function cfg = measureSettle(board, meas, cfg, plan)
-% Watches the cell settle and sets its capacitance from what that takes,
-% instead of leaving C_LOAD to stand for a junction nobody characterised.
-%
-% Done at the slowest state there is, the top of the ladder, because
-% settling is RC and R is largest there. Reading as fast as the ammeter
-% will go and finding when the readings stop moving gives a time; dividing
-% it by the tau count and that resistance gives a capacitance, which the
-% existing settle formula then scales correctly for every other state. One
-% measurement at the worst case, not a number repeated blindly at all of
-% them.
-%
-% This matters because guessing low does not add noise, it tilts the
-% curve. An under-settled point reads a current still falling toward its
-% value, the error grows with R, and R is what the sweep is ordered by, so
-% the whole plateau leans. That is exactly the shape the first cell run
-% showed: current climbing 5.7% from the bottom of the ladder to the top,
-% which was read as the cell doing something interesting.
+% Measures settling at the slowest state (largest R, worst-case RC) and
+% derives CLoad from it. Guessing low is not noise: an under-settled point
+% reads current still falling toward its value, worse at high R, which is
+% exactly the order the sweep runs in, so the whole plateau leans.
 
     ladder = [plan.Mode] ~= "SHORT" & [plan.Mode] ~= "OPEN";
     [rTop, at] = max([plan.Resistance] .* ladder);
     tol   = 0.002;                  % 0.2%, a few counts at 6.5 digits
-    limit = 5;                      % s, past which it is not settling
+    limit = 5;                      % s
 
     applyState(board, plan(at), 0);
 
@@ -2449,18 +2117,13 @@ function cfg = measureSettle(board, meas, cfg, plan)
         return
     end
 
-    % The value it ends at, taken from the last quarter so a slow tail
-    % cannot be mistaken for the answer, then the last moment the reading
-    % was still outside tolerance of it.
+    % Last quarter's median so a slow tail isn't mistaken for the answer.
     final = median(reading(good & times >= 0.75 * times(n)));
     moved = find(good & abs(reading - final) > tol * abs(final), 1, "last");
 
     if isempty(moved)
-        % Within tolerance by the first reading, which cannot resolve
-        % anything faster than one conversion plus the bus. Reporting that
-        % latency as a settling time would turn the meter's own speed into
-        % a cell capacitance, so it reports nothing and the configured
-        % allowance stands.
+        % Inside tolerance by the first reading: that's the meter's own
+        % conversion speed, not a cell capacitance, so nothing is reported.
         fprintf("  settling: already inside %.1f%% at the first reading " + ...
             "(%.0f ms), so it\n  is faster than this can measure. " + ...
             "CELL_SETTLE stands at %g s.\n", ...
@@ -2474,16 +2137,11 @@ function cfg = measureSettle(board, meas, cfg, plan)
     fprintf("  settling: %.0f ms to %.1f%% at %.0f ohm, %d readings.\n", ...
         1e3 * settled, 100 * tol, rTop, n);
 
-    % Settling and drift look identical over one window and mean opposite
-    % things. A capacitance charges and stops; illumination that is still
-    % moving never does, and reading it as capacitance is the worst
-    % possible response: it holds every state for longer, which gives the
-    % drift more time to move, which bends the curve further.
-    %
-    % Told apart by where the change sits. Settling puts it at the front
-    % of the window and leaves the tail flat; drift leaves the tail moving
-    % as much as the middle. Run 20260828_163338 was the second of those,
-    % and it was recorded as 35 uF.
+    % Settling and drift look identical over one window but mean opposite
+    % things; misreading drift as capacitance stretches every state and
+    % gives the drift more time to work (see docs/BRINGUP.md). Told apart
+    % by where the change sits: settling leaves the tail flat, drift keeps
+    % the tail moving as much as the middle.
     third  = max(2, floor(sum(good) / 3));
     values = reading(good);
     middle = median(values(end - 2*third + 1 : end - third));
@@ -2520,21 +2178,10 @@ function cfg = measureSettle(board, meas, cfg, plan)
 end
 
 function reportKnee(plan, voc, isc)
-% Says whether the knee is inside the ladder before the sweep spends
-% minutes finding out.
-%
-% The load sets the operating point: the cell sits where its curve crosses
-% a line of slope 1/R, so the resistance that lands on the maximum power
-% point is Vmp over Imp. Taking the usual 0.8 of Voc and 0.9 of Isc is
-% rough, and rough is enough for the only question here, which is whether
-% that resistance is inside the range of a board whose ladder spans two
-% decades.
-%
-% This prints and warns and does nothing else. It cannot skip a state or
-% choose one, which is the same rule the resistance model has always run
-% under: R_AB is plus or minus 20%, the wiper is measured on one board,
-% and neither is allowed to decide what gets measured. It is allowed to
-% decide what the operator is told before the run.
+% Rmpp = Vmp/Imp, approximated as 0.8*Voc / 0.9*Isc, checked against the
+% ladder's range so the operator knows before the sweep runs. Prints and
+% warns only: it never skips or chooses a state, same rule as the
+% resistance model everywhere else.
 
     ladder = [plan.Mode] ~= "SHORT" & [plan.Mode] ~= "OPEN";
     lo     = min([plan(ladder).Resistance]);
@@ -2564,14 +2211,13 @@ function reportKnee(plan, voc, isc)
 end
 
 function state = probeState(mode)
-% The settle a state of this mode gets, without going through the plan.
     state = struct('Mode', string(mode), 'Code1', 0, 'Code2', 0, ...
                    'Resistance', 0);
 end
 
 function value = probeRead(m, role, mode)
-% One reading, and it has to arrive. A probe that quietly returned NaN
-% would size the range from nothing and the whole run would inherit it.
+% Must arrive: a probe that quietly returned NaN would size the range
+% from nothing and the whole run would inherit it.
 
     try
         value = meterReadOnce(m);
@@ -2593,13 +2239,8 @@ end
 
 function [volts, amps, fault, meas] = readPoint(meas, cfg)
 % Both meters are triggered before either reply is collected, so the two
-% conversions overlap. Each dialect gets there its own way, and with two
-% different instruments on the bench both ways are in use at once. On the
-% 196, T5 makes the X that ends a command the trigger and K2 stops the
-% meter holding the bus off until that conversion finishes, which is what
-% lets the second trigger leave while the first is running. On the 34401A
-% the two are separate commands to begin with: INIT starts a conversion
-% into memory and returns, and FETC? collects it afterwards.
+% conversions overlap (196: K2 holds the bus open under a running
+% conversion; 34401A: INIT / FETC? are already separate).
 %
 % A timeout returns NaN rather than throwing: one dropped reading in 769 is
 % a lost row, and aborting an hour-long sweep over a bus hiccup is worse.
@@ -2639,15 +2280,9 @@ function [volts, amps, fault, meas] = readPoint(meas, cfg)
             amps, meas.IChanges);
     end
 
-    % An ammeter that changed range inside this point was on the wrong
-    % range while the voltmeter converted, and an overloaded 196 clamps
-    % over a volt of burden across its terminals, which sits in series
-    % with the cell and lands in the voltage reading. The recovered
-    % current is then real and the voltage is not, and their product is a
-    % power the cell never made: every run's first state after OPEN read
-    % about 1.5 V high this way, and at 0.7 A of laser drive the fake
-    % point outbid the true maximum. The pair is taken again now that
-    % both meters sit on ranges that fit.
+    % An ammeter overload mid-point clamps burden voltage in series with
+    % the cell, corrupting the paired voltage reading even though the
+    % recovered current is real. Reread now that both meters fit.
     if meas.IChanges > iChangesBefore && ~isnan(amps)
         try
             if cfg.Dmm.Parallel
@@ -2669,33 +2304,15 @@ end
 
 function [value, rangeNow, changes] = followRange(m, role, ranges, ...
                                                  rangeNow, value, changes)
-% Keeps a meter on the smallest range its reading fits, one state at a
-% time. Both meters use it, for different reasons.
-%
-% On volts it is resolution. A 34401A carries 0.0035% of reading plus
-% 0.0005% of range, and at 10 mV on the 10 V range that second term is
-% 50 uV against 0.35 uV from the first, so the points near the bottom of a
-% ladder crossing three decades are almost entirely range floor.
-%
-% On amps it is survival. A pinned ammeter cannot follow illumination that
-% moves, and a range it has run off the top of returns overflow, which is
-% a NaN, which after five in a row aborts the run.
-%
-% Two rules with hysteresis between them, so a reading parked near a
-% boundary cannot oscillate: widen at 90% of range or on overflow, narrow
-% under 8%, and narrow straight to the range that fits rather than one
-% step at a time, because the state after SHORT falls from volts to
-% millivolts in a single move.
-%
-% Overflow is recovered rather than logged. The alternative is a NaN at
-% exactly the state where the curve turns, that being where the reading
-% climbs fastest.
+% Keeps a meter on the smallest range its reading fits. Volts: range floor
+% dominates resolution (34401A: 0.0035% rdg + 0.0005% range). Amps: a
+% pinned range can't follow moving illumination and overflow (NaN) after
+% five in a row aborts the run. Hysteresis against oscillation: widen at
+% 90% of range or on overflow, narrow only under 8%, and jump straight to
+% the fitting range (SHORT to next state can fall volts to millivolts in
+% one step).
 
-    % Widened one range at a time until the reading fits or the meter has
-    % nothing wider, because an overflow says nothing about how far over
-    % it is. An adaptive sweep makes multi-decade jumps routine: a
-    % refinement round ends near OPEN with the meter narrowed to its
-    % floor, and the next one starts back at the bottom of the ladder.
+    % Widen one step at a time; overflow alone doesn't say how far over.
     while isnan(value)
         wider = min(ranges(ranges > rangeNow * 1.0001));
         if isempty(wider)
@@ -2732,12 +2349,9 @@ function [value, rangeNow, changes] = followRange(m, role, ranges, ...
 end
 
 function setMeterRange(m, role, range)
-% Range alone, without the function and without everything else the
-% configuration carries. On the 34401A that matters: CONF resets the
-% integration time, the autozero and the input impedance to that
-% function's defaults, so re-configuring mid-sweep to change a range would
-% quietly drop the meter back to 10 NPLC defaults and no high impedance
-% input. RANGe leaves all of it alone.
+% Range only, via RANGe not CONF: CONF resets NPLC, autozero and input
+% impedance to function defaults, which would silently undo the meter's
+% configured setup on every range change mid-sweep.
 
     D = m.Ddc;
 
@@ -2779,8 +2393,7 @@ function value = meterFetch(m)
 end
 
 function value = meterReadOnce(m)
-% Trigger and collect as one exchange, for the path where nothing is
-% overlapped.
+% Trigger and collect as one exchange, where nothing is overlapped.
 
     if m.Ddc.Dialect == "scpi"
         value = meterDecode(m, meterAsk(m, m.Ddc.Read));
@@ -2798,23 +2411,11 @@ function value = meterDecode(m, reply)
 end
 
 function value = ddcDecode(reply, prefixes)
-% A reading carries its own status: N for normal or O for overflow, then
-% three letters for the function, then the mantissa and exponent. An
-% overflow comes back as NaN so the caller counts it as a fault, because it
-% is a full-scale number that would otherwise sit in the CSV looking like a
-% measurement.
-%
-% The prefix is required rather than optional. G0 in the setup string asks
-% for it, so a reply arriving without one is not a reading this code asked
-% for, and a status word left unread would otherwise parse as a perfectly
-% plausible number.
-%
-% The tags come from the profile because they belong to the instrument, not
-% to the dialect. The 196 sends DCI for amps, figure 3-6; a decoder holding
-% another meter's list accepts the volts reading and rejects the current
-% one, which is the worst of both.
-%
-% Takes strings, not a port, so captured replies can drive it offline.
+% Reply is N/O + 3-letter function tag (196 manual fig 3-6) + mantissa.
+% Overflow (O) decodes to NaN so the caller treats it as a fault instead of
+% a full-scale number. The prefix match is required, not optional: a reply
+% missing it (e.g. a stray status word) would otherwise parse as a
+% plausible reading. Takes a string, not a port, so it can run offline.
 
     text   = extractBefore(strtrim(string(reply)) + ",", ",");   % G2 suffix
     prefix = regexp(text, "^[NO](" + prefixes + ")", "match", "once");
@@ -2828,16 +2429,9 @@ function value = ddcDecode(reply, prefixes)
 end
 
 function value = scpiDecode(reply, overflow)
-% A 34401A reading is the number and nothing else, so unlike the 196
-% decoder there is no prefix to demand and anything unparseable has to
-% carry the whole check. str2double gives NaN for that, which is what the
-% caller counts as a fault.
-%
-% Overflow is not a status letter here either: the meter returns 9.9E37 for
-% a reading past full scale, which is a perfectly valid number and would
-% otherwise land in the CSV as one.
-%
-% Takes a string, not a port, so captured replies can drive it offline.
+% 34401A returns 9.9E37 for an over-range reading, a valid-looking number
+% that would otherwise land in the CSV as a measurement; treated as NaN.
+% Takes a string, not a port, so it can run offline.
 
     value = str2double(strtrim(string(reply)));
 
@@ -2847,8 +2441,6 @@ function value = scpiDecode(reply, overflow)
 end
 
 function meterTell(m, command)
-% Send a command that produces no reply, in whichever dialect this meter
-% speaks.
 
     if m.Ddc.Dialect == "scpi"
         writeline(m.Port, command);
@@ -2858,9 +2450,8 @@ function meterTell(m, command)
 end
 
 function reply = meterAsk(m, command)
-% Send a command that does produce one, and insist on it. Both meters
-% answer a setting command with nothing at all, so routing a set through
-% here turns every successful write into a timeout.
+% For commands that produce a reply. Both meters answer a setting command
+% with nothing, so routing a set through here is a timeout on success.
 
     if m.Ddc.Dialect == "scpi"
         writeline(m.Port, command);
@@ -2875,15 +2466,11 @@ function reply = meterAsk(m, command)
 end
 
 function word = ddcAskStatus(m, command)
-% A status query whose answer must be the status word, not a reading. The
-% flush in ddcAsk clears the host buffer, but a stale reading can be
-% sitting in the meter itself: every command string ends in an X, under T5
-% every X is a trigger, and the reading that leaves is handed out on the
-% next talk even when a query has been answered since. Seen on the bench as
-% U1 answering "NDCI-00.00084E-3" after a clean identify. A reading is
-% recognisable, N or O and then a function tag, so up to two of them are
-% read past rather than mistaken for the word; anything else is returned
-% for the caller to judge.
+% The answer must be the status word, not a reading. ddcAsk's flush clears
+% the host buffer, but a stale reading can sit in the meter itself and be
+% handed out on the next talk. Seen as U1 answering "NDCI-00.00084E-3"
+% after a clean identify. Readings are recognisable (N or O then a
+% function tag), so up to two are read past.
 
     word = ddcAsk(m, command);
     for k = 1:2
@@ -2904,22 +2491,11 @@ function ddcTell(port, command)
 end
 
 function reply = ddcAsk(m, command)
-% Flushed first, because under T5 every command string this code sends ends
-% in an X and every X is a trigger. A setup string therefore leaves a
-% reading in the meter's output that nobody asked for, and the next query
-% reads that instead of its own answer. It is one behind from then on, and
-% it fails in the worst way: a status word query comes back with something
-% that parses as a plausible number.
-%
-% This is what U1 answering "NDCI-00.00009E-3" was, on the bench, at the
-% second configuration of the ammeter. The first configuration's X had
-% triggered a conversion and nothing had collected it.
-%
-% Discarding here rather than counting X's is deliberate. Whether a given
-% command string produces a reading depends on the trigger mode it is
-% itself setting up, so the count is not knowable from this side; what is
-% knowable is that a query's answer is the next thing the meter sends after
-% the query goes out.
+% Flushed first: under T5 every command string ends in an X and every X is
+% a trigger, so a setup string leaves an uncollected reading and the next
+% query reads that instead of its own answer, one behind from then on.
+% Discarded rather than counted, because whether a string produces a
+% reading depends on the trigger mode it is itself setting up.
 
     flush(m.Port, "input");
     ddcTell(m.Port, command);
@@ -2929,12 +2505,9 @@ function reply = ddcAsk(m, command)
             "No reply to ""%sX"" within %g s.", command, m.Timeout);
     end
 
-    % The query's own X started a conversion, K2 means the bus is not held
-    % off while it runs, and a command following too closely is a TRIGGER
-    % OVERRUN, latched and lit on the display. The conversion is waited out
-    % before the caller can send anything. The overlapped sweep path goes
-    % through meterTrigger and meterFetch, never through here, so this
-    % costs the setup a few tenths and a non-overlapped reading 0.1 s.
+    % The query's own X started a conversion and K2 leaves the bus unheld,
+    % so a command following too closely is a latched TRIGGER OVERRUN. The
+    % overlapped sweep path uses meterTrigger/meterFetch, not this.
     pause(0.1);
 end
 
@@ -2976,26 +2549,17 @@ function settle = settleFor(state, prevMode, cfg)
         T.Safety * (tSwitch + T.TauCount * state.Resistance * T.CLoad + ...
                     T.CellSettle));
 
-    % Capped by what is left of the point's budget once the conversion and
-    % the board have taken their share, so the ceiling is on the state and
-    % not merely on the pause inside it. The run time is a decision; the
-    % settle formula is an estimate, and a measured capacitance asking for
-    % seconds per state is exactly the case where waiting costs most, since
-    % the longer the sweep the further anything drifting has moved by the
-    % end of it.
+    % Capped by what is left of the point's budget after the conversion and
+    % the board, so the ceiling is on the state, not just the pause in it.
     settle = min(settle, settleCap(cfg));
 end
 
 function cap = settleCap(cfg)
-% What the hold may be if the state is to fit the budget. Never below the
-% relay settle, which is a hardware minimum rather than a preference.
+% Never below the relay settle, a hardware minimum.
 %
-% This shortens the waiting and nothing else. The conversion that follows
-% runs to completion, the reading is collected, and a point that overruns
-% because a meter changed range or an overflow had to be read again still
-% finishes and still lands in the CSV. No state is skipped and no reading
-% is cut short to make the time; the budget decides how long the sweep
-% pauses, not whether it measures.
+% This shortens the waiting and nothing else. The conversion runs to
+% completion and a point that overruns still lands in the CSV. The budget
+% decides how long the sweep pauses, not whether it measures.
 
     T = cfg.Timing;
     cap = T.Budget - T.Overhead - conversionTime(cfg);
@@ -3003,9 +2567,7 @@ function cap = settleCap(cfg)
 end
 
 function reading = conversionTime(cfg)
-% Overlapped, the pair costs the slower of the two; one at a time it costs
-% both. Two different instruments make that a real difference rather than
-% a doubling.
+% Overlapped, the pair costs the slower of the two; one at a time, both.
 
     if ~cfg.Dmm.Enabled
         reading = 0;
@@ -3046,15 +2608,13 @@ function results = runExperiment(board, meas, plan, cfg, log)
 end
 
 function results = runSweepAdaptive(board, meas, master, cfg, log)
-% The coarse pass, then rounds of states added between measured neighbours
-% wherever refineIntervals asks, until it stops asking or the point cap
-% lands. Refinement decides from the measured columns only; the master
-% plan supplies the codes and the order, which is the job the resistance
-% model has always had. Every round runs in that order, so the settles see
-% the same ascending walk the fixed sweep makes.
+% Coarse pass, then rounds of states added between measured neighbours
+% until refineIntervals stops asking or the point cap lands. Refinement
+% decides from the measured columns only; the master plan supplies the
+% codes and the order. Every round runs in that order, so the settles see
+% the same ascending walk.
 %
-% Faults follow runSweep's rule: the first point failing is
-% misconfiguration, and MaxFaults in a row aborts.
+% First point failing is misconfiguration; MaxFaults in a row aborts.
 
     cap      = min(cfg.Adapt.MaxPoints, numel(master));
     results  = allocateResults(cap);
@@ -3158,25 +2718,20 @@ function results = runSweepAdaptive(board, meas, master, cfg, log)
 end
 
 function [next, noise] = refineIntervals(measured, V, I, cfg)
-% Where the measured curve says another state is needed. Three rules, all
-% of them read off the measured voltages and currents, normalised to the
+% Three rules, all read off the measured V and I, normalised to the
 % measured span so one setting serves any cell:
 %
-%   - a segment between neighbours longer than Gap is split whatever its
-%     shape. a knee can sit entirely between two coarse states whose own
-%     readings both look tame, and only the length of the jump shows it.
-%   - a point sitting further than Bend off the chord of its neighbours
-%     marks a bend, and both segments at it are split.
-%   - the two segments at the largest measured power are always split, so
-%     the maximum power point ends up resolved as finely as the ladder
-%     goes even once the curve there looks locally straight.
+%   - a segment longer than Gap is split whatever its shape, because a
+%     knee can sit between two coarse states that both read tame.
+%   - a point further than Bend off the chord of its neighbours is a bend;
+%     both segments at it are split.
+%   - the two segments at the largest measured power are always split.
 %
-% Splitting is by position in the master plan, which the resistance model
-% ordered: the model still only orders, the measurements decide. A
-% segment between plan neighbours cannot be split further and drops out
-% on its own, which is what ends the refinement. A state that returned
-% NaN takes no part in the geometry, so a dropped reading widens a
-% segment rather than poisoning it.
+% Splitting is by position in the master plan: the model orders, the
+% measurements decide. A segment between plan neighbours cannot split
+% further and drops out, which is what ends refinement. A NaN takes no
+% part in the geometry, so a dropped reading widens a segment rather than
+% poisoning it.
 
     next  = [];
     noise = 0;
@@ -3198,16 +2753,13 @@ function [next, noise] = refineIntervals(measured, V, I, cfg)
     n    = numel(idx);
     flag = false(n - 1, 1);
 
-    % The noise floor, read off the curve itself. The points run in order
-    % of increasing load, so on one curve the current can only fall and
-    % the voltage can only rise; every step the wrong way is the
-    % illumination having moved between two readings, and the size of
-    % those steps is the size of the wobble. Both thresholds sit on top
-    % of it, so a light that will not hold still widens what counts as a
-    % bend instead of feeding an endless split of segments whose shape is
-    % noise. The 0.55 A laser run wobbled ~10% and spent a hundred states
-    % chasing it before this floor existed. A clean curve has no wrong-way
-    % steps and the floor is zero, which leaves both settings untouched.
+    % The noise floor, read off the curve itself. Points run in order of
+    % increasing load, so current can only fall and voltage only rise;
+    % every step the wrong way is the illumination having moved between
+    % readings. Both thresholds sit on top of it, so a light that will not
+    % hold still widens what counts as a bend instead of splitting
+    % segments whose shape is noise: the 0.55 A laser run wobbled ~10% and
+    % spent a hundred states chasing it. A clean curve floors at zero.
     dx = diff(x);
     dy = diff(y);
     up   = mean(dy(dy > 0));
@@ -3242,13 +2794,10 @@ function [next, noise] = refineIntervals(measured, V, I, cfg)
 end
 
 function checkDrift(board, meas, master, results, prev, cfg)
-% The SHORT state measured again after the last point brackets the run:
-% the cell has no memory, so a first and last reading of the same state
-% that disagree are the illumination having moved while the sweep ran,
-% and every point in between was taken somewhere along that slide. The
-% 174402 run wobbled 1-2% in seconds and the wobble is what the plateau's
-% zigzag is. Reported rather than corrected, and not a row in the CSV, so
-% the sweep's own SHORT stays the Isc.
+% SHORT measured again at the end brackets the run: the cell has no
+% memory, so a first and last reading that disagree are the illumination
+% having moved while the sweep ran. Reported rather than corrected, and
+% not a row in the CSV, so the sweep's own SHORT stays the Isc.
 
     at = find([master.Mode] == "SHORT", 1);
     first = find(results.Mode == "SHORT", 1);
@@ -3283,9 +2832,8 @@ function checkDrift(board, meas, master, results, prev, cfg)
 end
 
 function d = chordDistance(x1, y1, x2, y2, x3, y3)
-% Perpendicular distance from the middle point to the chord of its
-% neighbours, in whatever units the caller normalised to. A degenerate
-% chord makes the plain distance to the first point the answer.
+% Perpendicular distance from the middle point to its neighbours' chord.
+% A degenerate chord falls back to the plain distance to the first point.
 
     len = hypot(x3 - x1, y3 - y1);
     if len < eps
@@ -3329,11 +2877,8 @@ function results = allocateResults(nStates)
 end
 
 function results = recordPoint(results, row, state, settle, volts, amps)
-% One row.
-%
-% Resistance and power are computed from the measured values, never from
-% the wiper code. That is the whole reason the board carries no sensing:
-% the tap code is a repeatable setting, not a known resistance.
+% Resistance and power come from the measured values, never from the wiper
+% code: the tap code is a repeatable setting, not a known resistance.
 
     results.StateIndex(row)    = row;
     results.Mode(row)          = state.Mode;
@@ -3366,10 +2911,8 @@ end
 %  =====================================================================
 
 function log = openLog(cfg, nStates)
-% One file per run, named for when it started. Never overwritten: the
-% timestamp is what stops a second run landing on the first, and RUN_TAG is
-% what tells two runs at different illumination apart afterwards, since
-% nothing in the script knows what the lamp was doing.
+% One file per run, never overwritten: the timestamp stops a second run
+% landing on the first, and RUN_TAG is the only record of the lamp.
 
     log = struct('Readings', "");
 
@@ -3427,13 +2970,11 @@ end
 %  =====================================================================
 
 function safeShutdown(board, meas, cfg)
-% Every step is guarded separately and none rethrow, because this runs
-% during an interrupt and an error raised here would mask whatever caused
-% the abort.
+% Every step guarded separately and none rethrow: this runs during an
+% interrupt, and an error raised here would mask what caused the abort.
 %
-% The cell is a supply and the board is what stands between it and a
-% short, so returning the board to OPEN is the whole job. Darkening the
-% cell is the operator's, the same as lighting it was.
+% Returning the board to OPEN is the whole job. The cell is still lit when
+% this finishes; darkening it is the operator's, as lighting it was.
 
     try
         enterSafeState(board);
