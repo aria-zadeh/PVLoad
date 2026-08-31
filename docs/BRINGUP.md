@@ -16,10 +16,10 @@ cell, so every reading is the load a cell would see. 24 V bench supply on J2 and
 J3. Arduino Uno on COM4 through the 1x10 header. MATLAB drives it and `RUN`
 selects the mode.
 
-`RUN = "verify"` is the seven-hold check for a freshly assembled board. `"ramp"`
-walks the whole sweep slowly enough to follow on a handheld. `"wiper"` and `"k3"`
-isolate single elements. All four touch the board only, with no cell and no
-bench meters involved.
+`RUN = "verify"` is the seven-hold check for a freshly assembled board, and its
+last two holds are the K3 test. `"ramp"` walks the whole sweep slowly enough to
+follow on a handheld. `"wiper"` isolates the wiper resistance. All three touch
+the board only, with no cell and no bench meters involved.
 
 ## Power order
 
@@ -113,9 +113,9 @@ depend on the probe path being good.
 
 ## Board 1 faults
 
-**K3 does not close.** Confirmed with `RUN = "k3"`, which holds `LOW` and writes
-U2 to 0 and 255 alternately. With K3 closed U2 is shorted out and all four holds
-must read alike. They did not:
+**K3 does not close.** Confirmed by holding `LOW` and writing U2 to 0 and 255
+alternately, which is what the last two holds of `RUN = "verify"` do. With K3
+closed U2 is shorted out and all four holds must read alike. They did not:
 
 | Hold | U2 code | Measured |
 |---|---|---|

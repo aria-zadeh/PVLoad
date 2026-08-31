@@ -20,12 +20,11 @@ is common to both and cancels. Design any new check the same way.
 
 ## The diagnostic modes
 
-The first four open the board and nothing else. No cell, no bench meters.
+The first three open the board and nothing else. No cell, no bench meters.
 
 | `RUN` | States | Answers |
 |---|---|---|
 | `"verify"` | 7 | Is this board sound? |
-| `"k3"` | 4 | Does K3 close? |
 | `"wiper"` | varies | What is the wiper resistance? |
 | `"ramp"` | `RAMP_STEPS` | Does resistance track code across the whole range? |
 | `"ohms"` | 769 | The same question, measured rather than eyeballed |

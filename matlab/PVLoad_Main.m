@@ -14,7 +14,6 @@ clc;
 %             follow on a handheld meter across J1 and J3
 %   "wiper"   board only, the pairs of states whose difference is one
 %             wiper resistance and nothing else
-%   "k3"      board only, four holds that say whether K3 closes
 %   "verify"  board only, seven holds that between them exercise every
 %             part of the board. the check for a freshly built one.
 %   "ohms"    board and one meter on ohms across J1 and J3. every
@@ -89,8 +88,6 @@ CELL_AREA_CM2 = 0;         % cm2 of illuminated cell, or 0 if not known.
 % a sweep costs about six minutes; RUN "plan" prints the estimate before
 % anything is opened.
 
-SETTLE_TIME  = 0.20;       % s per state with no meters. ignored once
-                           % DMM_ENABLED, which computes the hold instead.
 PRINT_STATUS = true;       % echo each state. off for long unattended runs.
 SELF_TEST    = true;       % probe both pots over SPI first. false to test
                            % the flow on a bare Arduino with no board.
@@ -134,7 +131,6 @@ RUN_TAG   = "ILASER0p850";            % added to the file names. this is where t
 % on: the coarse thinning is ADAPT_COARSE_STEP and refinement can land on
 % any of the 769 states.
 
-ADAPTIVE_SWEEP    = true;
 ADAPT_COARSE_STEP = 32;    % wiper codes between coarse states, the same
                            % thinning CODE_STEP does. 32 makes the first
                            % pass 27 states.
@@ -183,9 +179,6 @@ CODE_STEP     = 16;        % 1 visits all 769 states, 16 visits 50, and the
                            % count is 767/step + 2. thins by wiper code,
                            % never by resistance, so which points survive
                            % does not depend on the resistance model.
-INCLUDE_SHORT = true;      % the Isc endpoint (K2 closed)
-INCLUDE_OPEN  = true;      % the Voc endpoint (470 kohm in circuit)
-VERIFY_WIPER  = true;      % read each wiper register back after writing
 
 
 % orders the sweep and labels output. never enters a result.
@@ -408,7 +401,7 @@ POINT_BUDGET  = 1.0;       % s, the most one state may cost end to end.
                            % minute.
 BOARD_OVERHEAD = 0.08;     % s of USB round trips per state: three relay
                            % writes, two wiper writes, and two readbacks
-                           % when VERIFY_WIPER is on. measured off the
+                           % of the wiper registers. measured off the
                            % clock rather than the datasheet, and the term
                            % that made the last estimate too low.
 RC_TAU_COUNT  = 7;         % time constants. e^-7 is 0.09%.
@@ -451,12 +444,8 @@ cfg = struct( ...
     'PinK1',         PIN_K1_DRIVE, ...
     'PinK2',         PIN_K2_DRIVE, ...
     'PinK3',         PIN_K3_DRIVE, ...
-    'SettleTime',    SETTLE_TIME, ...
     'CodeStep',      CODE_STEP, ...
     'PrintStatus',   PRINT_STATUS, ...
-    'IncludeShort',  INCLUDE_SHORT, ...
-    'IncludeOpen',   INCLUDE_OPEN, ...
-    'VerifyWiper',   VERIFY_WIPER, ...
     'SelfTest',      SELF_TEST, ...
     'RampSteps',     RAMP_STEPS, ...
     'RampDwell',     RAMP_DWELL, ...
@@ -474,7 +463,6 @@ cfg.Cell = struct( ...
     'AreaCm2', CELL_AREA_CM2);
 
 cfg.Adapt = struct( ...
-    'Enabled',    ADAPTIVE_SWEEP, ...
     'CoarseStep', ADAPT_COARSE_STEP, ...
     'Gap',        ADAPT_GAP, ...
     'Bend',       ADAPT_BEND, ...
@@ -524,7 +512,6 @@ switch cfg.Run
     case "board",  runBoardCheck(cfg);
     case "ramp",   runRamp(cfg);
     case "wiper",  runWiperCheck(cfg);
-    case "k3",     runK3Check(cfg);
     case "verify", runVerify(cfg);
     case "ohms",   runOhmsSweep(cfg);
     case "meters", runMeterCheck(cfg);
@@ -538,11 +525,7 @@ end
 
 function runPlanOnly(cfg)
 
-    if cfg.Adapt.Enabled
-        plan = buildMasterPlan(cfg);
-    else
-        plan = buildSweepPlan(cfg);
-    end
+    plan = buildMasterPlan(cfg);
     reportPlan(cfg, plan);
     fprintf("\nNothing was opened. Set RUN to board, meters or sweep to " + ...
         "use hardware.\n");
@@ -762,43 +745,6 @@ end
 
 function h = verifyHold(mode, code1, code2, proves)
     h = struct('Mode', mode, 'Code1', code1, 'Code2', code2, 'Proves', proves);
-end
-
-function runK3Check(cfg)
-% Four holds and one question: does K3 close.
-%
-% K3 shorts out U2 whenever the board is in LOW, so U2's code cannot reach
-% the terminals and all four holds have to read alike. If they do not, K3
-% never operated and U2 has been in the path the whole time. That failure
-% is invisible everywhere else on this board, because it only makes LOW and
-% FULL read the same, which looks like a component with no resistance
-% rather than a relay that did not move.
-%
-% The codes are written straight to the pots instead of coming from the
-% plan, because no planned state drives U2 while K3 is closed.
-
-    board = connectBoard(cfg);
-    guard = onCleanup(@() quietly(@() enterSafeState(board)));
-
-    enterSafeState(board);
-
-    fprintf("\nFour holds, %g s each. Write down all four.\n", cfg.RampDwell);
-    fprintf("All four alike means K3 closes. A jump of about 5000 ohm\n");
-    fprintf("between them means it does not.\n\n");
-
-    setMode(board, "LOW");
-    labels = ["A" "B" "C" "D"];
-    codes  = [0 255 0 255];
-    for k = 1:4
-        fprintf("  %s   U2 code %3d\n", labels(k), codes(k));
-        drawnow;
-        setWipers(board, 0, codes(k));
-        pause(cfg.RampDwell);
-    end
-
-    enterSafeState(board);
-    clear guard;
-    fprintf("\nDone. Returned to OPEN.\n");
 end
 
 function runOhmsSweep(cfg)
@@ -1030,8 +976,7 @@ function k = findState(plan, mode, code, cfg)
     if isempty(k)
         error("PVLoad:StateNotInPlan", ...
             "%s at code %d is not in the sweep. CODE_STEP is %g and " + ...
-            "INCLUDE_SHORT is %d; both have to leave that state in.", ...
-            mode, code, cfg.CodeStep, cfg.IncludeShort);
+            "has to leave that state in.", mode, code, cfg.CodeStep);
     end
 end
 
@@ -1068,14 +1013,9 @@ function results = runSweepAll(cfg)
 % curves is several runs of this rather than one run of several levels.
 % RUN_TAG is the only record of which was which.
 
-    % The adaptive sweep refines into the gaps of its coarse pass, so it
-    % works against the full plan whatever CODE_STEP says. The fixed sweep
-    % keeps its thinned one.
-    if cfg.Adapt.Enabled
-        plan = buildMasterPlan(cfg);
-    else
-        plan = buildSweepPlan(cfg);
-    end
+    % The sweep refines into the gaps of its coarse pass, so it works
+    % against the full plan whatever CODE_STEP says.
+    plan = buildMasterPlan(cfg);
     reportPlan(cfg, plan);
 
     board = connectBoard(cfg);
@@ -1439,9 +1379,7 @@ function states = enumerateStates(cfg)
     states = makeState("", 0, 0, 0);
     states(:) = [];                       % empty struct array of the right shape
 
-    if cfg.IncludeShort
-        states(end+1) = makeState("SHORT", 0, 0, cfg.RContact);
-    end
+    states(end+1) = makeState("SHORT", 0, 0, cfg.RContact);
 
     % LOW: U2 bypassed by K3, so only U1 is in the path.
     for n1 = 0:cfg.CodeStep:cfg.WiperSteps
@@ -1456,10 +1394,8 @@ function states = enumerateStates(cfg)
         states(end+1) = makeState("FULL", n1, n2, r);  %#ok<AGROW>
     end
 
-    if cfg.IncludeOpen
-        r = cfg.ROpenPath + 2 * cfg.RWiper;
-        states(end+1) = makeState("OPEN", 0, 0, r);
-    end
+    r = cfg.ROpenPath + 2 * cfg.RWiper;
+    states(end+1) = makeState("OPEN", 0, 0, r);
 end
 
 function [n1, n2] = splitCode(total, maxCode)
@@ -1482,7 +1418,7 @@ function assertConfig(cfg)
 % Catches a mistyped config block before anything is energised.
 
     mustBeOneOf(cfg.Run, ...
-        ["plan" "board" "ramp" "wiper" "k3" "verify" "ohms" "meters" ...
+        ["plan" "board" "ramp" "wiper" "verify" "ohms" "meters" ...
          "sweep"], "RUN");
 
     if cfg.RampSteps < 2 || cfg.RampSteps > 769
@@ -1505,34 +1441,32 @@ function assertConfig(cfg)
     end
 
     A = cfg.Adapt;
-    if A.Enabled
-        if A.CoarseStep < 1 || A.CoarseStep > cfg.WiperSteps || ...
-           mod(A.CoarseStep, 1) ~= 0
-            error("PVLoad:BadAdaptStep", ...
-                "ADAPT_COARSE_STEP is %g. It thins by wiper code the way " + ...
-                "CODE_STEP does, so it must be a whole number from 1 to " + ...
-                "%d.", A.CoarseStep, cfg.WiperSteps);
-        end
-        if A.Gap <= 0 || A.Gap > 1 || A.Bend <= 0 || A.Bend > 1
-            error("PVLoad:BadAdaptThreshold", ...
-                "ADAPT_GAP and ADAPT_BEND are fractions of the measured " + ...
-                "I-V span, above 0 and at most 1. They are %g and %g.", ...
-                A.Gap, A.Bend);
-        end
-        nCoarse = numel(0:A.CoarseStep:cfg.WiperSteps) + ...
-                  numel(0:A.CoarseStep:2 * cfg.WiperSteps) + ...
-                  cfg.IncludeShort + cfg.IncludeOpen;
-        if A.MaxPoints < nCoarse
-            error("PVLoad:BadAdaptCap", ...
-                "ADAPT_MAX_POINTS is %g and the coarse pass alone is %d " + ...
-                "states. The cap has to hold at least the coarse pass.", ...
-                A.MaxPoints, nCoarse);
-        end
-        if A.MaxRounds < 1 || mod(A.MaxRounds, 1) ~= 0
-            error("PVLoad:BadAdaptRounds", ...
-                "ADAPT_MAX_ROUNDS is %g. It must be a whole number of at " + ...
-                "least 1.", A.MaxRounds);
-        end
+    if A.CoarseStep < 1 || A.CoarseStep > cfg.WiperSteps || ...
+       mod(A.CoarseStep, 1) ~= 0
+        error("PVLoad:BadAdaptStep", ...
+            "ADAPT_COARSE_STEP is %g. It thins by wiper code the way " + ...
+            "CODE_STEP does, so it must be a whole number from 1 to " + ...
+            "%d.", A.CoarseStep, cfg.WiperSteps);
+    end
+    if A.Gap <= 0 || A.Gap > 1 || A.Bend <= 0 || A.Bend > 1
+        error("PVLoad:BadAdaptThreshold", ...
+            "ADAPT_GAP and ADAPT_BEND are fractions of the measured " + ...
+            "I-V span, above 0 and at most 1. They are %g and %g.", ...
+            A.Gap, A.Bend);
+    end
+    nCoarse = numel(0:A.CoarseStep:cfg.WiperSteps) + ...
+              numel(0:A.CoarseStep:2 * cfg.WiperSteps) + ...
+              2;                        % SHORT and OPEN
+    if A.MaxPoints < nCoarse
+        error("PVLoad:BadAdaptCap", ...
+            "ADAPT_MAX_POINTS is %g and the coarse pass alone is %d " + ...
+            "states. The cap has to hold at least the coarse pass.", ...
+            A.MaxPoints, nCoarse);
+    end
+    if A.MaxRounds < 1 || mod(A.MaxRounds, 1) ~= 0
+        error("PVLoad:BadAdaptRounds", ...
+            "ADAPT_MAX_ROUNDS is %g. It must be a whole number of at " + ...
+            "least 1.", A.MaxRounds);
     end
 
     D = cfg.Dmm;
@@ -1641,20 +1575,13 @@ function reportPlan(cfg, plan)
 % Everything needed to decide whether to let it run, before anything opens.
 
     perPoint = estimatePointTime(cfg, plan);
-    total    = perPoint * numel(plan);
+    nCoarse  = numel(coarseIndices(plan, cfg));
+    cap      = min(cfg.Adapt.MaxPoints, numel(plan));
 
-    if cfg.Adapt.Enabled
-        nCoarse = numel(coarseIndices(plan, cfg));
-        cap     = min(cfg.Adapt.MaxPoints, numel(plan));
-        fprintf("Adaptive sweep: %d coarse states of %d possible, " + ...
-            "%g ohm to %g ohm.\n", nCoarse, numel(plan), ...
-            plan(1).Resistance, plan(end).Resistance);
-        fprintf("Refinement then adds states where the measured curve " + ...
-            "bends, to at most %d.\n", cap);
-    else
-        fprintf("Sweep plan: %d load states, %g ohm to %g ohm.\n", ...
-            numel(plan), plan(1).Resistance, plan(end).Resistance);
-    end
+    fprintf("Sweep: %d coarse states of %d possible, %g ohm to %g ohm.\n", ...
+        nCoarse, numel(plan), plan(1).Resistance, plan(end).Resistance);
+    fprintf("Refinement then adds states where the measured curve " + ...
+        "bends, to at most %d.\n", cap);
 
     % Whether the cell is described here or found at the start of the run.
     % The OPEN state check that used to live here has moved to probeRanges,
@@ -1677,15 +1604,10 @@ function reportPlan(cfg, plan)
         fprintf("Meters: none. Voltage and current will be logged as NaN.\n");
     end
 
-    if cfg.Adapt.Enabled
-        fprintf("About %.0f ms per point. Estimated run time %.1f to " + ...
-            "%.1f minutes, set by how much\nof the curve turns out to " + ...
-            "bend.\n", 1e3 * perPoint, perPoint * nCoarse / 60, ...
-            perPoint * cap / 60);
-    else
-        fprintf("About %.0f ms per point. Estimated run time %.1f " + ...
-            "minutes.\n", 1e3 * perPoint, total / 60);
-    end
+    fprintf("About %.0f ms per point. Estimated run time %.1f to " + ...
+        "%.1f minutes, set by how much\nof the curve turns out to " + ...
+        "bend.\n", 1e3 * perPoint, perPoint * nCoarse / 60, ...
+        perPoint * cap / 60);
 end
 
 function t = estimatePointTime(cfg, plan)
@@ -1720,9 +1642,8 @@ function board = connectBoard(cfg)
     board.PinK1      = cfg.PinK1;
     board.PinK2      = cfg.PinK2;
     board.PinK3      = cfg.PinK3;
-    board.SettleTime = cfg.SettleTime;
+    board.SafeSettle = cfg.Timing.RelaySettle;
     board.Print      = cfg.PrintStatus;
-    board.Verify     = cfg.VerifyWiper;
 
     configurePin(a, cfg.PinK1, "DigitalOutput");
     configurePin(a, cfg.PinK2, "DigitalOutput");
@@ -1806,9 +1727,8 @@ function verifyWiper(dev, expected, label)
     if actual ~= expected
         error("PVLoad:WiperMismatch", ...
             "%s did not take the wiper code: wrote %d, read back %d. " + ...
-            "Check the chip select wiring, the SDO line, and that SHDN# " + ...
-            "is held high. Set VERIFY_WIPER to false to sweep blind.", ...
-            label, expected, actual);
+            "Check the chip select wiring, the SDO line, and that " + ...
+            "SHDN# is held high.", label, expected, actual);
     end
 end
 
@@ -1817,10 +1737,8 @@ function setWipers(board, code1, code2)
     writeWiper(board.U1, code1);
     writeWiper(board.U2, code2);
 
-    if board.Verify
-        verifyWiper(board.U1, code1, "U1");
-        verifyWiper(board.U2, code2, "U2");
-    end
+    verifyWiper(board.U1, code1, "U1");
+    verifyWiper(board.U2, code2, "U2");
 end
 
 function selfTestPotentiometers(board)
@@ -1862,7 +1780,7 @@ function enterSafeState(board)
 % Also where the board lands on an Arduino reset, entered deliberately.
     setMode(board, "OPEN");
     setWipers(board, 0, 0);
-    pause(board.SettleTime);
+    pause(board.SafeSettle);
 end
 
 
@@ -3044,10 +2962,8 @@ function settle = settleFor(state, prevMode, cfg)
 % The meter's integration window is deliberately absent: READ? blocks for
 % it after this pause, so counting it here would only slow the sweep.
 
-    if ~cfg.Dmm.Enabled
-        settle = cfg.SettleTime;
-        return
-    end
+% Every term below is the board and the load, so this holds with the
+% meters off as well; conversionTime is what goes to zero there.
 
     T = cfg.Timing;
     if state.Mode == prevMode
@@ -3123,68 +3039,10 @@ function results = runExperiment(board, meas, plan, cfg, log)
         fprintf("Self-test skipped. The potentiometers are unverified.\n");
     end
 
-    if cfg.Adapt.Enabled
-        results = runSweepAdaptive(board, meas, plan, cfg, log);
-    else
-        results = runSweep(board, meas, plan, cfg, log);
-    end
+    results = runSweepAdaptive(board, meas, plan, cfg, log);
 
     enterSafeState(board);
     clear guard;
-end
-
-function results = runSweep(board, meas, plan, cfg, log)
-% A failure on the very first point is misconfiguration rather than a
-% glitch, so it aborts instead of NaNing its way through 769 states.
-
-    total   = numel(plan);
-    results = allocateResults(total);
-    prev    = "";
-    run     = 0;               % consecutive faults
-    faults  = 0;
-    written = 0;               % states already on disk
-    started = tic;             % what the point actually costs, not the estimate
-
-    for k = 1:total
-        settle = settleFor(plan(k), prev, cfg);
-        applyState(board, plan(k), settle);
-        prev = plan(k).Mode;
-
-        [volts, amps, fault, meas] = readPoint(meas, cfg);
-
-        if fault
-            faults = faults + 1;
-            run    = run + 1;
-            if k == 1 || run > cfg.Dmm.MaxFaults
-                error("PVLoad:MeterUnresponsive", ...
-                    "The meters failed %d reading(s) in a row at state " + ...
-                    "%d of %d. Check the cabling and the addresses.", ...
-                    run, k, total);
-            end
-        else
-            run = 0;
-        end
-
-        results = recordPoint(results, k, plan(k), settle, volts, amps);
-
-        if cfg.PrintStatus
-            printState(k, total, plan(k), volts, amps);
-        end
-
-        % Flushed in blocks rather than at the end, so an abort keeps
-        % everything up to the last block boundary. Per row would be
-        % correct and far too slow: writetable reopens the file each call.
-        if k - written >= cfg.Out.Chunk || k == total
-            appendPoints(log, results, (written + 1):k, written == 0);
-            written = k;
-        end
-    end
-
-    fprintf("\n%d read fault(s).\n", faults);
-    fprintf("%.0f ms per state in the end, against the %.0f ms " + ...
-        "estimated.\n", 1e3 * toc(started) / total, ...
-        1e3 * estimatePointTime(cfg, plan));
-    reportRangeChanges(meas);
 end
 
 function results = runSweepAdaptive(board, meas, master, cfg, log)
@@ -3533,13 +3391,8 @@ function log = openLog(cfg, nStates)
     log.Readings = string(fullfile(dir, "pvload_" + stamp + tag + ".csv"));
 
     fprintf("Logging to %s\n", log.Readings);
-    if cfg.Adapt.Enabled
-        fprintf("  at most %d states, written in blocks of %d.\n", ...
-            min(cfg.Adapt.MaxPoints, nStates), cfg.Out.Chunk);
-    else
-        fprintf("  %d states, written in blocks of %d.\n", nStates, ...
-            cfg.Out.Chunk);
-    end
+    fprintf("  at most %d states, written in blocks of %d.\n", ...
+        min(cfg.Adapt.MaxPoints, nStates), cfg.Out.Chunk);
 end
 
 function appendPoints(log, results, rows, first)
