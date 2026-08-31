@@ -127,6 +127,7 @@ function results = runSweepAdaptive(board, meas, master, cfg, log)
     written = 0;
     faults  = 0;
     run     = 0;
+    noise   = 0;
     prev    = "";
     started = tic;
     queue   = Plan.coarse(master, cfg);
@@ -180,7 +181,8 @@ function results = runSweepAdaptive(board, meas, master, cfg, log)
             break
         end
 
-        queue = refineIntervals(measured, V, I, cfg);
+        [queue, seen] = refineIntervals(measured, V, I, cfg);
+        noise = max(noise, seen);
         queue = queue(~measured(queue));
         if isempty(queue)
             break
@@ -198,6 +200,16 @@ function results = runSweepAdaptive(board, meas, master, cfg, log)
 
     checkDrift(board, meas, master, results, prev, cfg);
 
+    if 3 * noise > cfg.Adapt.Bend
+        warning("PVLoad:RefinementAtNoiseFloor", ...
+            "The measured curve stepped the wrong way, current up or " + ...
+            "voltage down with rising load, by about %.1f%% of its span. " + ...
+            "That is the illumination wobbling between readings, and " + ...
+            "refinement held itself above that floor instead of chasing " + ...
+            "it. The states are honest; the wobble is in every one of " + ...
+            "them.", 100 * noise);
+    end
+
     fprintf("\n%d of %d states measured, %d read fault(s).\n", ...
         row, numel(master), faults);
     fprintf("%.0f ms per state in the end, against the %.0f ms " + ...
@@ -206,7 +218,7 @@ function results = runSweepAdaptive(board, meas, master, cfg, log)
     Meter.reportRangeChanges(meas);
 end
 
-function next = refineIntervals(measured, V, I, cfg)
+function [next, noise] = refineIntervals(measured, V, I, cfg)
 % Where the measured curve says another state is needed. Three rules, all
 % off the measured V and I and normalised to the measured span so one
 % setting serves any cell:
@@ -223,8 +235,9 @@ function next = refineIntervals(measured, V, I, cfg)
 % part in the geometry, so a dropped reading widens a segment rather than
 % poisoning it.
 
-    next = [];
-    idx  = find(measured(:) & ~isnan(V(:)) & ~isnan(I(:)));
+    next  = [];
+    noise = 0;
+    idx   = find(measured(:) & ~isnan(V(:)) & ~isnan(I(:)));
     if numel(idx) < 2
         return
     end
@@ -242,11 +255,31 @@ function next = refineIntervals(measured, V, I, cfg)
     n    = numel(idx);
     flag = false(n - 1, 1);
 
-    flag(hypot(diff(x), diff(y)) > cfg.Adapt.Gap) = true;
+    % The noise floor, read off the curve itself. Points run in order of
+    % increasing load, so current can only fall and voltage only rise; a
+    % step the wrong way is the illumination having moved between two
+    % readings, and the size of those steps is the size of the wobble.
+    % Both thresholds sit on top of it, so a light that will not hold
+    % still widens what counts as a bend instead of feeding an endless
+    % split of segments whose shape is noise -- the 0.55 A laser run
+    % wobbled ~10% and spent a hundred states chasing it. A clean curve
+    % has no wrong-way steps, so the floor is zero and both settings
+    % stand untouched.
+    dx = diff(x);
+    dy = diff(y);
+    up   = mean(dy(dy > 0));
+    down = mean(-dx(dx < 0));
+    if isnan(up),   up = 0;   end
+    if isnan(down), down = 0; end
+    noise = 2 * hypot(up, down);
+    bend  = max(cfg.Adapt.Bend, 3 * noise);
+    gap   = max(cfg.Adapt.Gap,  4 * noise);
+
+    flag(hypot(dx, dy) > gap) = true;
 
     for j = 2:n - 1
         d = chordDistance(x(j-1), y(j-1), x(j), y(j), x(j+1), y(j+1));
-        if d > cfg.Adapt.Bend
+        if d > bend
             flag(j - 1) = true;
             flag(j)     = true;
         end
