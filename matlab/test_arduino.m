@@ -1,8 +1,7 @@
 % test_arduino - bench test of the Arduino alone, before the PCB exists
 %
-% Checks that every pin PVLoad-R1 uses can actually drive and read.
-% Nothing but the Arduino and a USB cable is required. Two of the tests
-% additionally use a multimeter, and two use a single male-to-male jumper.
+% Checks that every pin PVLoad-R1 uses can drive and read. Arduino and USB
+% cable only; two tests also want a multimeter, two want one jumper.
 %
 % Pins under test, matching the pin map in PVLoad_Main.m:
 %   D6  K1 drive        D10  U1 CS#
@@ -13,54 +12,36 @@
 %
 % MULTIMETER SETTINGS
 %
-%   Dial:   DC voltage. Marked V with a straight line and dashes above it
-%           (V⎓), or DCV. Not V~, which is AC.
-%   Range:  20 V if the meter is manual-ranging. Autoranging meters pick it
-%           themselves.
-%   Black:  into COM, probe on any Arduino GND pin.
-%   Red:    into the V/Ω socket, probe on the pin being tested.
+%   Dial on DC voltage (V⎓ or DCV, not V~), 20 V range if manual. Black in
+%   COM on any GND pin, red in V/Ω on the pin under test. 4.7 to 5.2 V is
+%   a healthy HIGH, a few tens of millivolts a healthy LOW.
 %
-%   Expect about 5 V for HIGH and about 0 V for LOW. Anything from 4.7 to
-%   5.2 V is a healthy HIGH. A few tens of millivolts is a healthy LOW.
-%
-%   Do not use the current (A) or resistance (Ω) setting on a pin that is
-%   being driven. In current mode the meter is a piece of wire, so probing
-%   a HIGH pin against GND shorts that pin straight to ground. An Uno pin
-%   is rated 40 mA absolute maximum and that connection exceeds it.
+%   Never use the current (A) or resistance (Ω) setting on a driven pin.
+%   In current mode the meter is a piece of wire, so probing a HIGH pin
+%   against GND shorts it to ground, past the Uno's 40 mA absolute maximum.
 %
 %
 % TESTS
 %
-%   "dmm_high"      Drive all eight pins HIGH and leave them there. Probe
-%                   each one at your own pace. Every one should read ~5 V.
+%   "dmm_high"      All eight pins HIGH and left there. Each reads ~5 V.
 %
-%   "dmm_low"       Same, all LOW. Every one should read ~0 V. Run this
-%                   after dmm_high; a pin stuck at 5 V here is a dead pin.
+%   "dmm_low"       Same, all LOW. Run after dmm_high; a pin stuck at 5 V
+%                   here is a dead pin.
 %
-%   "dmm_walk"      Walk a single HIGH across the eight pins, one at a
-%                   time, printing which one is live. Leave the probe on
-%                   one pin and watch it pulse when its turn comes round.
+%   "dmm_walk"      Walks a single HIGH across the eight pins. Leave the
+%                   probe on one and watch it pulse on its turn.
 %
-%   "loopback"      No multimeter. Jumper the pins in pairs as printed,
-%                   and the script drives one side and reads the other,
-%                   then swaps. This proves each pin works as both an
-%                   output and an input, which a voltage reading cannot.
+%   "loopback"      No multimeter, four jumpers. Drives one side of each
+%                   pair and reads the other, then swaps, proving each pin
+%                   works as input and output, which a voltage cannot.
 %
-%   "spi_loopback"  No multimeter. One jumper from D11 to D12. The script
-%                   sends bytes over the real SPI peripheral and checks
-%                   they come back. This is the only test that exercises
-%                   the SPI hardware itself, which is what the DigiPots
-%                   will hang off.
+%   "spi_loopback"  No multimeter, one jumper D11 to D12. The only test
+%                   that exercises the SPI peripheral the DigiPots hang off.
 %
-%   "one_pin"       Drives a single pin, set by ONE_PIN, HIGH and LOW on a
-%                   slow cycle so it can be followed downstream with a
-%                   voltmeter. Unlike the tests above this one is meant to
-%                   be run with the PCB attached, to follow one relay
-%                   drive from the Arduino through the base resistor and
-%                   transistor to the coil. Point it at D6, D7 or D8 in
-%                   turn: the three drives are identical circuits, so a
-%                   channel that works is the reference for one that does
-%                   not.
+%   "one_pin"       Drives ONE_PIN HIGH and LOW slowly, to be followed
+%                   downstream with a voltmeter. Meant to run with the PCB
+%                   attached. D6, D7 and D8 are identical circuits, so a
+%                   working channel is the reference for a broken one.
 %
 % Run the first five in that order. Each is independent.
 
@@ -125,11 +106,8 @@ end
 %  =====================================================================
 
 function holdAllPins(a, pins, roles, level)
-% Drives every pin to one level and leaves it there.
-%
-% The pins keep that level after the script finishes, because the arduino
-% object stays in the workspace. Probe at whatever pace suits you. The
-% state is lost when you clear the workspace or unplug the board.
+% The pins keep the level after the script finishes, because the arduino
+% object stays in the workspace. Clearing it loses the state.
 
     if level == 1
         expected = "about 5 V";
@@ -158,10 +136,8 @@ function holdAllPins(a, pins, roles, level)
 end
 
 function drivePin(a, pin, pins, roles, period, cycles)
-% One pin, driven HIGH and LOW slowly enough to chase downstream with a
-% voltmeter. Toggling rather than holding, because a node that sits at the
-% right voltage is not the same as a node that follows the pin: a floating
-% probe point and a working one can read alike until something moves.
+% Toggled rather than held: a floating probe point and a working one read
+% alike until something moves.
 %
 % Three points to follow, black lead on any ground:
 %
@@ -169,13 +145,10 @@ function drivePin(a, pin, pins, roles, period, cycles)
 %                       or the wire to the header, not the board.
 %   transistor base     ~0.7 V HIGH, ~0 V LOW. Stuck at 0 V means the base
 %                       resistor or the header connection.
-%   transistor collector  ~0.2 V HIGH, ~5 V LOW. Note it runs backwards:
-%                       the transistor pulls the coil down when the pin is
-%                       HIGH. Stuck at 5 V means the transistor is not
-%                       switching. Following correctly while the relay
-%                       stays silent means the coil or the relay.
-%
-% Compare against a channel that works. K1 and K2 are the same circuit.
+%   transistor collector  ~0.2 V HIGH, ~5 V LOW, backwards because the
+%                       transistor pulls the coil down on HIGH. Stuck at
+%                       5 V means it is not switching; following correctly
+%                       while the relay stays silent means the coil.
 
     idx = find(pins == pin, 1);
     if isempty(idx)
@@ -241,11 +214,9 @@ end
 %  =====================================================================
 
 function runLoopback(a, pairs)
-% Drives one pin of each pair and reads the other, then swaps roles.
-%
-% A voltage reading only shows that a pin can push 5 V out. This shows the
-% level actually arrives somewhere and that the receiving pin can sense it,
-% which is what SPI and chip select need.
+% A voltage reading only shows a pin can push 5 V out. This shows the level
+% arrives and that the receiving pin senses it, which is what SPI and chip
+% select need.
 
     fprintf("Wire these four jumpers before continuing:\n\n");
     for k = 1:size(pairs, 1)
@@ -295,13 +266,10 @@ function failed = testPair(a, driver, listener)
 end
 
 function runSpiLoopback(a, csPin)
-% Sends bytes out of MOSI and checks they arrive back on MISO.
-%
-% With D11 tied to D12 the SPI peripheral is talking to itself, so whatever
-% is clocked out is clocked straight back in. If the returned bytes match,
-% the clock, the shift register and both data lines are working. If they
-% come back as all zeros or all 0xFF, the jumper is off or a data pin is
-% dead.
+% With D11 tied to D12 the SPI peripheral talks to itself, so what is
+% clocked out comes straight back. Matching bytes mean the clock, the shift
+% register and both data lines work. All zeros or all 0xFF mean the jumper
+% is off or a data pin is dead.
 
     fprintf("Wire one jumper before continuing:\n\n");
     fprintf("    D11 (SDI/MOSI)  <---->  D12 (SDO/MISO)\n\n");
