@@ -1,5 +1,4 @@
 classdef Util
-% Two helpers with no home of their own.
 
 methods (Static)
 
@@ -12,8 +11,6 @@ function out = ternary(condition, a, b)
 end
 
 function quietly(fn)
-% Swallows whatever a teardown step throws, so a second failure cannot hide
-% the first.
     try
         fn();
     catch

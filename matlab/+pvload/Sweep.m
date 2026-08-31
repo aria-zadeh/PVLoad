@@ -1,18 +1,4 @@
 classdef Sweep
-% Running the plan and recording what came back, fixed or adaptive.
-%
-% Sweep.execute must stay a function with its own workspace. Ctrl-C in
-% MATLAB is an interrupt, not an exception: it does not run catch blocks,
-% and onCleanup fires only when the workspace holding it is destroyed,
-% which never happens to a script's base workspace. That guard is what
-% returns the board to OPEN on an abort, so it is written fully qualified
-% and nothing else may own it.
-%
-% The fixed and adaptive loops are kept apart rather than folded together.
-% They share the shape of a state -- settle, apply, read, account, record,
-% print, append -- but the adaptive one indexes a master plan, counts
-% against a point cap and requeues between rounds, so a shared helper would
-% need most of the loop state passed in and back out again.
 
 methods (Static)
 
@@ -27,14 +13,11 @@ end
 end
 end
 
-
 function results = runExperiment(board, meas, plan, cfg, log)
-% Has to be a function, not script-level code. Ctrl-C in MATLAB is an
-% interrupt, not an exception: it does not run catch blocks. onCleanup is
-% the only thing that fires, and only when the workspace holding it is
-% destroyed, which never happens to a script's base workspace. This
-% function exists to give the guard a workspace to die with.
 
+    % Ctrl-C is an interrupt, not an exception: catch blocks never run and
+    % only onCleanup fires, when the workspace holding it dies. That is why
+    % this is a function.
     guard = onCleanup(@() pvload.Sweep.shutdown(board, meas, cfg));
 
     Board.safeState(board);
@@ -53,11 +36,6 @@ function results = runExperiment(board, meas, plan, cfg, log)
 end
 
 function results = runSweepAdaptive(board, meas, master, cfg, log)
-% The coarse pass, then rounds of states added wherever refineIntervals
-% asks, until it stops asking or the cap lands. Every round runs in master
-% plan order, so the settles see the same ascending walk the fixed sweep
-% makes. Faults follow runSweep's rule: first point failing aborts, and so
-% does MaxFaults in a row.
 
     cap      = min(cfg.Adapt.MaxPoints, numel(master));
     results  = allocateResults(cap);
@@ -161,21 +139,6 @@ function results = runSweepAdaptive(board, meas, master, cfg, log)
 end
 
 function [next, noise] = refineIntervals(measured, V, I, cfg)
-% Where the measured curve says another state is needed. Three rules, all
-% off the measured V and I and normalised to the measured span so one
-% setting serves any cell:
-%
-%   - a segment longer than Gap splits whatever its shape, because a knee
-%     can sit between two coarse states that both read flat.
-%   - a point further than Bend off the chord of its neighbours is a bend,
-%     and both segments at it split.
-%   - the two segments at the largest measured power always split.
-%
-% Splitting is by position in the master plan: the model orders, the
-% measurements decide. A segment between plan neighbours cannot split
-% further and drops out, which is what ends the refinement. A NaN takes no
-% part in the geometry, so a dropped reading widens a segment rather than
-% poisoning it.
 
     next  = [];
     noise = 0;
@@ -197,16 +160,8 @@ function [next, noise] = refineIntervals(measured, V, I, cfg)
     n    = numel(idx);
     flag = false(n - 1, 1);
 
-    % The noise floor, read off the curve itself. Points run in order of
-    % increasing load, so current can only fall and voltage only rise; a
-    % step the wrong way is the illumination having moved between two
-    % readings, and the size of those steps is the size of the wobble.
-    % Both thresholds sit on top of it, so a light that will not hold
-    % still widens what counts as a bend instead of feeding an endless
-    % split of segments whose shape is noise -- the 0.55 A laser run
-    % wobbled ~10% and spent a hundred states chasing it. A clean curve
-    % has no wrong-way steps, so the floor is zero and both settings
-    % stand untouched.
+    % current can only fall and voltage only rise with rising load, so a
+    % step the wrong way is the light moving. Both thresholds sit above it.
     dx = diff(x);
     dy = diff(y);
     up   = mean(dy(dy > 0));
@@ -241,12 +196,9 @@ function [next, noise] = refineIntervals(measured, V, I, cfg)
 end
 
 function checkDrift(board, meas, master, results, prev, cfg)
-% SHORT measured again after the last point brackets the run. The cell has
-% no memory, so a first and last reading that disagree are the illumination
-% having moved, and every point between was taken along that slide -- the
-% 174402 run wobbled 1-2% in seconds. Reported, never corrected, and no CSV
-% row, so the sweep's own SHORT stays the Isc.
 
+    % SHORT again at the end. The cell has no memory, so a first and last
+    % reading that disagree are the illumination having moved.
     at = find([master.Mode] == "SHORT", 1);
     first = find(results.Mode == "SHORT", 1);
     if ~meas.Enabled || isempty(at) || isempty(first) || ...
@@ -280,9 +232,6 @@ function checkDrift(board, meas, master, results, prev, cfg)
 end
 
 function d = chordDistance(x1, y1, x2, y2, x3, y3)
-% Perpendicular distance from the middle point to the chord of its
-% neighbours, in whatever units the caller normalised to. A degenerate
-% chord makes the plain distance to the first point the answer.
 
     len = hypot(x3 - x1, y3 - y1);
     if len < eps
@@ -293,7 +242,6 @@ function d = chordDistance(x1, y1, x2, y2, x3, y3)
 end
 
 function results = allocateResults(nStates)
-% Filled by index rather than grown, which keeps this linear.
 
     z = nan(nStates, 1);
 
@@ -305,7 +253,6 @@ function results = allocateResults(nStates)
 end
 
 function results = trimResults(results, n)
-% Cut the preallocated rows an adaptive run did not use.
 
     for name = string(fieldnames(results))'
         results.(name) = results.(name)(1:n);
@@ -313,11 +260,6 @@ function results = trimResults(results, n)
 end
 
 function results = recordPoint(results, row, state, settle, volts, amps)
-% One row.
-%
-% Resistance and power are computed from the measured values, never from
-% the wiper code. That is the whole reason the board carries no sensing:
-% the tap code is a repeatable setting, not a known resistance.
 
     results.StateIndex(row)    = row;
     results.Mode(row)          = state.Mode;
@@ -344,16 +286,7 @@ function printState(index, total, state, volts, amps)
         state.Resistance, reading);
 end
 
-
-%% =====================================================================
-%  Logging
-%  =====================================================================
-
 function safeShutdown(board, meas, cfg)
-% Every step guarded separately and none rethrow: this runs during an
-% interrupt, and an error here would mask whatever caused the abort.
-% Returning the board to OPEN is the whole job; darkening the cell is the
-% operator's, the same as lighting it was.
 
     try
         Board.safeState(board);

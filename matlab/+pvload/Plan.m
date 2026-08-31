@@ -1,13 +1,4 @@
 classdef Plan
-% Which load states exist and in what order.
-%
-% The resistance model orders and labels; it never decides membership.
-% Uniqueness is structural: one state per LOW code, one per FULL code-sum,
-% one SHORT, one OPEN, 769 in all. To shorten a fixed sweep raise
-% CODE_STEP, which skips codes deliberately rather than inferring which are
-% redundant. The LOW and FULL ladders overlap and that overlap is kept:
-% they are offset by a wiper resistance the datasheet does not characterise
-% at a 24 V span, so the duplicates were never confirmed to be duplicates.
 
 methods (Static)
 
@@ -30,12 +21,7 @@ end
 end
 end
 
-
 function plan = buildSweepPlan(cfg)
-% Every state the board can produce, ordered by the resistance model.
-% That model orders and labels only, it never decides what gets measured.
-% Uniqueness is structural: one state per LOW code, one per FULL code-sum,
-% one SHORT, one OPEN. 769 total.
 
     states = enumerateStates(cfg);
 
@@ -45,17 +31,12 @@ function plan = buildSweepPlan(cfg)
 end
 
 function master = buildMasterPlan(cfg)
-% Every state the board can make, whatever CODE_STEP says. The adaptive
-% sweep thins for itself and refines into the gaps, so it needs the full
-% 769 to choose from.
 
     cfg.CodeStep = 1;
     master = buildSweepPlan(cfg);
 end
 
 function idx = coarseIndices(master, cfg)
-% The states the adaptive coarse pass measures: the thinning CODE_STEP
-% does, by wiper code and never by resistance, plus both endpoints.
 
     step = cfg.Adapt.CoarseStep;
     mode = [master.Mode];
@@ -66,22 +47,20 @@ function idx = coarseIndices(master, cfg)
 end
 
 function states = enumerateStates(cfg)
-% LOW is listed before FULL so a resistance tie visits the LOW state first,
-% putting one fewer wiper resistance in the path.
 
+    % LOW before FULL so a resistance tie takes the state with one
+    % less wiper in the path
     step   = cfg.RabNominal / cfg.WiperSteps;
     states = makeState("", 0, 0, 0);
     states(:) = [];                       % empty struct array of the right shape
 
     states(end+1) = makeState("SHORT", 0, 0, cfg.RContact);
 
-    % LOW: U2 bypassed by K3, so only U1 is in the path.
     for n1 = 0:cfg.CodeStep:cfg.WiperSteps
         r = cfg.RWiper + cfg.RContact + n1 * step;
         states(end+1) = makeState("LOW", n1, 0, r);  %#ok<AGROW>
     end
 
-    % FULL: both pots in series. Sweep the combined code and split it.
     for total = 0:cfg.CodeStep:(2 * cfg.WiperSteps)
         [n1, n2] = splitCode(total, cfg.WiperSteps);
         r = 2 * cfg.RWiper + total * step;
@@ -93,7 +72,6 @@ function states = enumerateStates(cfg)
 end
 
 function [n1, n2] = splitCode(total, maxCode)
-% Any split with the right sum is the same circuit, so U1 fills first.
     n1 = min(total, maxCode);
     n2 = total - n1;
 end
@@ -103,14 +81,7 @@ function state = makeState(mode, code1, code2, resistance)
                    'Resistance', resistance);
 end
 
-
-%% =====================================================================
-%  Validation and planning
-%  =====================================================================
-
 function k = findState(plan, mode, code, cfg)
-% Pulled out of the plan rather than rebuilt, so this mode cannot drift
-% away from the resistance model the sweep uses.
 
     switch mode
         case "SHORT"

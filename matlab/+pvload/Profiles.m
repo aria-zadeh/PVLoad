@@ -1,27 +1,13 @@
 classdef Profiles
-% What each instrument speaks. Part of the meter library with Meter.m and
-% like it depends on nothing else in pvload. docs/METERS.md is the long
-% version; only the reasons a value cannot change are repeated here.
-%
-% The 196 predates SCPI: letters and numbers, several per string, nothing
-% executing until an X arrives. The 34401A is SCPI: words, one per line, a
-% bare number for a reading. Nothing above the transport is shared, so each
-% profile carries a Dialect and the bus functions branch on it. The model
-% is named per meter because the voltmeter and the ammeter need not be the
-% same instrument, and here they are not.
 
 methods (Static)
 
 function list = all(nplc, lineHz, zeroCorrect)
-% The profiles, as a cell array rather than a struct array because the two
-% carry different fields. The 34401A's integration time and conversion
-% estimate come from Part 1, so they arrive as arguments.
 
     list = {ddc196(), scpi34401A(nplc, lineHz, zeroCorrect)};
 end
 
 function profile = select(profiles, model, name)
-% Matched on Model rather than indexed by position.
 
     for k = 1:numel(profiles)
         if profiles{k}.Model == model
@@ -40,9 +26,6 @@ function profile = select(profiles, model, name)
 end
 
 function s = spec(profile, address, range, ranges, zeroCorrect, timeout)
-% Everything one meter needs, in one place. Ranges is the list for the
-% function this meter will be asked for and nothing else, so a caller
-% holding a spec never has to work out which of the three applies.
 
     s = struct( ...
         'Ddc',         profile, ...
@@ -60,27 +43,13 @@ end
 end
 end
 
-
 function p = ddc196()
-% Keithley 196, manual 196-901-01 Rev D. Functions from 3.9.2, ranges from
-% table 3-9, the rest from the command summary in table 3-8.
-%
-% Amps is F3; F1 and F2 are the AC functions. No zero check, so
-% DMM_ZERO_CORRECT does nothing here.
-%
-% Common in order: relative off, so a REL left on the front panel cannot
-% offset every reading; readings from the A/D not the buffer; send the
-% overflow prefix; SRQ mask cleared; K2, EOI on and bus hold-off off, which
-% is what lets the second meter be triggered while this one converts; S3,
-% 6.5 digits and 106 ms per table 3-16; T5, convert once per X.
-%
-% Prefixes are the reading mnemonics of figure 3-6. DC amps is DCI, not the
-% DCA another Keithley uses; a decoder without that turns every current
-% reading into NaN. StatusMap is where each setting's digit sits in the U0
-% machine word, counted after the 196 prefix, mapped on the bench by
-% toggling one setting at a time. Setup is verified against that word
-% because the error word cannot be trusted near a session open, see
-% Meter/primeDdc.
+% Every letter is off manual 196-901-01 Rev D: functions 3.9.2, ranges
+% table 3-9, the rest table 3-8. Amps is F3, not F1 or F2 which are AC.
+% S3 is 6.5 digits and 106 ms. K2 is EOI on and hold-off off, which is
+% what lets the other meter be triggered while this one converts.
+% Prefixes are figure 3-6; DC amps is DCI, not DCA. StatusMap is where
+% each setting sits in the U0 word, mapped on the bench.
 
     p = struct( ...
         'Model',      "196", ...
@@ -107,22 +76,11 @@ function p = ddc196()
 end
 
 function p = scpi34401A(nplc, lineHz, zeroCorrect)
-% Agilent 34401A, manual 34401-90004. NOT RUN AGAINST THE INSTRUMENT YET:
-% ordinary SCPI off the manual, but no reading has come back from it. The
-% SYST:ERR? drain after every setup is what catches a command it rejects.
+% Manual 34401-90004. Not run against the instrument yet.
 %
-% Volts, Amps and Ohms are function nodes, used twice over: CONF:<node>
-% <range> selects function and range together, and <node>:NPLC sets the
-% integration time afterwards. CONF resets integration time, autozero and
-% input impedance to that function's defaults, so Common must follow it.
-%
-% The delay is TRIG:DEL:AUTO ON, not TRIG:DEL AUTO. Manual page 80 makes
-% AUTO a node rather than a parameter; the short form is -224, Illegal
-% parameter value, which the meter reported before this was corrected.
-%
-% Conversion is nplc line cycles plus about 60 ms of command and range
-% overhead, doubled under autozero because the meter takes a zero reading
-% between every measurement.
+% TRIG:DEL:AUTO ON, not TRIG:DEL AUTO: AUTO is a node, and the short
+% form comes back -224. Conversion is nplc line cycles plus ~60 ms,
+% doubled under autozero.
 
     p = struct( ...
         'Model',      "34401A", ...

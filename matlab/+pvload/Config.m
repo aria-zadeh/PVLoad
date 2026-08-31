@@ -1,10 +1,8 @@
 classdef Config
-% Catches a mistyped settings block before anything is energised.
 
 methods (Static)
 
     function check(cfg)
-    % Catches a mistyped config block before anything is energised.
 
         mustBeOneOf(cfg.Run, ...
             ["plan" "board" "ramp" "wiper" "verify" "ohms" "meters" ...
@@ -69,26 +67,16 @@ methods (Static)
                 "DMM_TIMEOUT is %g s but one conversion takes %g s.", ...
                 D.Timeout, max(D.V.Conversion, D.I.Conversion));
         end
-        % Checked per meter, and not gated on D.Enabled, for the same reason
-        % DMM_R_RANGE is not: RUN "ohms" opens one meter and configures it
-        % through the same path. An NPLC the meter does not have is rejected at
-        % the bus with nothing to say which of these two numbers caused it.
         Meter.checkNplc(D.V, D.LineHz);
         Meter.checkNplc(D.I, D.LineHz);
         Meter.checkNplc(D.R, D.LineHz);
 
         if D.Enabled && D.V.Range > 0
-            % Every range is named, so one that does not exist is a config
-            % error here rather than something the meter sorts out later. A
-            % zero means the range is sized from VOC_FULL or ISC_FULL instead,
-            % which is what keeps one configuration working on any of them.
             Meter.checkRange(D.V.Range, D.V.Ranges, "DMM_V_RANGE", D.V.Label);
         end
         if D.Enabled && D.I.Range > 0
             Meter.checkRange(D.I.Range, D.I.Ranges, "DMM_I_RANGE", D.I.Label);
         end
-        % Not gated on D.Enabled: RUN "ohms" uses one meter and that flag is
-        % about the pair the sweep needs.
         if D.R.Range > 0
             Meter.checkRange(D.R.Range, D.R.Ranges, "DMM_R_RANGE", D.R.Label);
         end
@@ -123,7 +111,6 @@ methods (Static)
 
 end
 end
-
 
 function mustBeOneOf(value, allowed, name)
     if ~any(string(value) == allowed)

@@ -1,9 +1,4 @@
 classdef Board
-% The Arduino, the three relays and the two digipots.
-%
-% docs/HARDWARE.md is the reference. Every run mode that touches hardware
-% goes through Board.safeState first and again on the way out, because the
-% cell is a supply and the board is what stands between it and a short.
 
 methods (Static)
 
@@ -34,7 +29,6 @@ end
 end
 end
 
-
 function board = connectBoard(cfg)
 
     a = arduino(cfg.SerialPort, cfg.BoardType, "Libraries", "SPI");
@@ -56,8 +50,6 @@ function board = connectBoard(cfg)
 end
 
 function assertSpiPins(a, cfg)
-% SPI pins are fixed by the hardware peripheral, so an edited pin map must
-% fail loudly instead of silently describing the wrong wiring.
 
     switch string(a.Board)
         case {"Uno", "Nano3", "ProMini328_5V", "ProMini328_3V"}
@@ -87,9 +79,8 @@ function setRelays(board, k1, k2, k3)
 end
 
 function setMode(board, mode)
-% K2 is opened first when leaving SHORT, so the short path is never left
-% closed on the way into OPEN, which would collapse Voc to roughly 0 V.
 
+    % K2 opens first, or the short stays closed into OPEN and Voc reads 0
     if ~strcmp(mode, "SHORT")
         writeDigitalPin(board.Arduino, board.PinK2, 0);
     end
@@ -109,8 +100,6 @@ function setMode(board, mode)
 end
 
 function writeWiper(dev, code)
-% Two-byte write, HARDWARE.md section 5: address 0000, command 00, then
-% the 8-bit code.
 
     if ~isscalar(code) || code < 0 || code > 255 || mod(code, 1) ~= 0
         error("PVLoad:BadWiperCode", "Wiper code must be an integer 0-255.");
@@ -119,9 +108,6 @@ function writeWiper(dev, code)
 end
 
 function code = readWiper(dev)
-% Read command 0x0C. The answer clocks out in the second byte. The first
-% byte's status bits are not decoded, because comparing the code already
-% catches every failure they would report.
 
     out  = writeRead(dev, uint8([12, 0]), 'uint8');
     code = double(out(2));
@@ -138,7 +124,8 @@ function verifyWiper(dev, expected, label)
 end
 
 function setWipers(board, code1, code2)
-% U2 is written even when K3 bypasses it, so it is never left unknown.
+
+    % U2 is written even when K3 bypasses it, so it is never unknown
     writeWiper(board.U1, code1);
     writeWiper(board.U2, code2);
 
@@ -147,10 +134,8 @@ function setWipers(board, code1, code2)
 end
 
 function selfTestPotentiometers(board)
-% The only check that the SPI link is bidirectional and that each chip
-% select reaches the chip it should. HARDWARE.md section 6: a bad supply
-% sequence silently forces the wiper to mid-scale.
 
+    % a bad supply order silently forces the wiper to mid-scale
     probes = [0, 85, 170, 255];
     chips  = {'U1', 'U2'};
 
@@ -182,13 +167,7 @@ function applyState(board, state, settle)
 end
 
 function enterSafeState(board)
-% Also where the board lands on an Arduino reset, entered deliberately.
     setMode(board, "OPEN");
     setWipers(board, 0, 0);
     pause(board.SafeSettle);
 end
-
-
-%% =====================================================================
-%  Multimeters
-%  =====================================================================

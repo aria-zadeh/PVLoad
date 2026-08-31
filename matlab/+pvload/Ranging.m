@@ -1,12 +1,4 @@
 classdef Ranging
-% Sizing the meters from the cell in front of them, before the run.
-%
-% OPEN is the largest voltage of the sweep and SHORT the largest current,
-% and every other state is one of those two with resistance added, so two
-% readings on autorange bound the whole run. ISC_FULL and VOC_FULL remain
-% for pinning a range across a family of runs at different light; zero, the
-% default, means measure it. The sweep itself runs on a settled range,
-% because a range hunt inside a point spends conversions on the wrong one.
 
 methods (Static)
 
@@ -29,12 +21,7 @@ end
 end
 end
 
-
 function [cfg, meas] = probeRanges(board, meas, cfg, plan)
-% Measures the two numbers the meters are sized from instead of being told
-% them. A pinned ISC_FULL or VOC_FULL skips its half of the probe.
-%
-% Costs two states and two reconfigurations against a run of minutes.
 
     if ~meas.Enabled
         return
@@ -67,9 +54,6 @@ function [cfg, meas] = probeRanges(board, meas, cfg, plan)
         fprintf("  SHORT %9.4f mA\n", 1e3 * isc);
     end
 
-    % Back to OPEN before anything else happens, which is the same rule the
-    % sweep runs under: a closed K2 across a lit cell is not a state to
-    % leave the board in while the meters are being reconfigured.
     Board.safeState(board);
 
     vRange = pickVoltageRange(cfg, voc);
@@ -80,10 +64,6 @@ function [cfg, meas] = probeRanges(board, meas, cfg, plan)
     fprintf("  ranges %g V and %g mA, 20%% above what the cell showed.\n", ...
         vRange, 1e3 * iRange);
 
-    % The 470 kohm path draws a current fixed by Voc while Isc scales with
-    % the light, so under weak illumination the OPEN state stops being an
-    % open circuit. Now measured rather than estimated, and worth saying
-    % before an hour of sweeping rather than after.
     fraction = (voc / cfg.ROpenPath) / isc;
     if fraction > 0.05
         warning("PVLoad:OpenPointWeak", ...
@@ -100,15 +80,9 @@ function [cfg, meas] = probeRanges(board, meas, cfg, plan)
 end
 
 function cfg = measureSettle(board, meas, cfg, plan)
-% Takes the cell's capacitance from how long it actually settles, rather
-% than leaving C_LOAD to stand for an uncharacterised junction. Measured at
-% the top of the ladder, settling being RC and R largest there; the settle
-% formula scales it to every other state.
-%
-% Guessing low does not add noise, it tilts the curve: an under-settled
-% point reads a current still falling, the error grows with R, and R is
-% what the sweep is ordered by. The first cell run leaned 5.7% that way.
 
+    % measured at the top of the ladder, settling being RC and R largest
+    % there. Guessing low tilts the curve rather than adding noise.
     ladder = [plan.Mode] ~= "SHORT" & [plan.Mode] ~= "OPEN";
     [rTop, at] = max([plan.Resistance] .* ladder);
     tol   = 0.002;                  % 0.2%, a few counts at 6.5 digits
@@ -143,18 +117,10 @@ function cfg = measureSettle(board, meas, cfg, plan)
         return
     end
 
-    % The value it ends at, taken from the last quarter so a slow tail
-    % cannot be mistaken for the answer, then the last moment the reading
-    % was still outside tolerance of it.
     final = median(reading(good & times >= 0.75 * times(n)));
     moved = find(good & abs(reading - final) > tol * abs(final), 1, "last");
 
     if isempty(moved)
-        % Within tolerance by the first reading, which cannot resolve
-        % anything faster than one conversion plus the bus. Reporting that
-        % latency as a settling time would turn the meter's own speed into
-        % a cell capacitance, so it reports nothing and the configured
-        % allowance stands.
         fprintf("  settling: already inside %.1f%% at the first reading " + ...
             "(%.0f ms), so it\n  is faster than this can measure. " + ...
             "CELL_SETTLE stands at %g s.\n", ...
@@ -168,11 +134,8 @@ function cfg = measureSettle(board, meas, cfg, plan)
     fprintf("  settling: %.0f ms to %.1f%% at %.0f ohm, %d readings.\n", ...
         1e3 * settled, 100 * tol, rTop, n);
 
-    % Settling and drift look identical over one window and mean opposite
-    % things, and reading drift as capacitance is the worst answer: it
-    % holds every state longer, giving the drift more time to move. Told
-    % apart by where the change sits -- settling leaves the tail flat.
-    % Run 20260828_163338 was drift, and it recorded as 35 uF.
+    % settling puts its change at the front of the window and leaves the
+    % tail flat; drift does not. Run 20260828_163338 read drift as 35 uF.
     third  = max(2, floor(sum(good) / 3));
     values = reading(good);
     middle = median(values(end - 2*third + 1 : end - third));
@@ -209,12 +172,6 @@ function cfg = measureSettle(board, meas, cfg, plan)
 end
 
 function reportKnee(plan, voc, isc)
-% Whether the knee is inside the ladder, before the sweep spends minutes
-% finding out. The cell sits where its curve crosses a line of slope 1/R,
-% so the resistance at maximum power is Vmp over Imp; 0.8 of Voc over 0.9
-% of Isc is rough and rough answers the only question here.
-%
-% Prints and warns and nothing else. It may not skip or choose a state.
 
     ladder = [plan.Mode] ~= "SHORT" & [plan.Mode] ~= "OPEN";
     lo     = min([plan(ladder).Resistance]);
@@ -244,14 +201,11 @@ function reportKnee(plan, voc, isc)
 end
 
 function state = probeState(mode)
-% The settle a state of this mode gets, without going through the plan.
     state = struct('Mode', string(mode), 'Code1', 0, 'Code2', 0, ...
                    'Resistance', 0);
 end
 
 function value = probeRead(m, role, mode)
-% One reading, and it has to arrive. A probe that quietly returned NaN
-% would size the range from nothing and the whole run would inherit it.
 
     try
         value = Meter.readOnce(m);
@@ -272,8 +226,6 @@ function value = probeRead(m, role, mode)
 end
 
 function range = pickCurrentRange(iscExpected, cfg)
-% Settled once per run. Autorange exists and is not used for the sweep: a
-% hunt inside a settled point spends conversions on the wrong range.
 
     I = cfg.Dmm.I;
 
@@ -295,11 +247,6 @@ function range = pickCurrentRange(iscExpected, cfg)
 end
 
 function range = pickVoltageRange(cfg, vocSeen)
-% Sizing from a voltage rather than naming a number keeps one setting
-% working on either meter, whose ranges do not line up: a 9 V Voc lands on
-% 30 V on a 196 and 10 V on a 34401A. The voltage is whatever the caller
-% knows -- VOC_FULL, the measured OPEN reading, or nothing, which asks for
-% autorange.
 
     V = cfg.Dmm.V;
 
@@ -316,10 +263,6 @@ function range = pickVoltageRange(cfg, vocSeen)
         return
     end
 
-    % No headroom, unlike the ammeter. The OPEN state is the highest
-    % voltage the sweep reaches, so the measurement is already the maximum,
-    % and rounding a 9 V cell up past the 10 V range would cost the
-    % 34401A's high impedance input, which exists only below that.
     fits = V.Ranges(V.Ranges >= vocSeen);
     if isempty(fits)
         range = max(V.Ranges);

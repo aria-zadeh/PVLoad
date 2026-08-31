@@ -1,25 +1,10 @@
 classdef Curve
-% The numbers a cell is judged by, and the figure that shows them.
-%
-% Magnitudes throughout: which sign the leads produce is a wiring choice
-% and papers plot the first quadrant. The CSV keeps what the meters
-% reported. Isc and Voc come from the SHORT and OPEN states because that is
-% what those states are for, and the flags say when a fallback was used.
-% Efficiency is deliberately absent: it needs the incident optical power,
-% which the software neither sets nor knows.
 
 methods (Static)
 
     function stats = summarise(results, cfg)
-    % Off the measured columns and nothing else.
-    %
-    % Isc and Voc come from the SHORT and OPEN states rather than the
-    % extremes of the sweep, because that is what those states are for.
-    % Neither is a true endpoint: the 470 kohm OPEN path draws a fixed
-    % current, so under weak light it stops being an open circuit. Falling
-    % back to the measured extreme keeps a partial run useful, and the
-    % flags say which happened.
 
+        % magnitudes throughout; the CSV keeps the signs the meters reported
         v  = abs(results.VoltageV);
         i  = abs(results.CurrentA);
         p  = v .* i;
@@ -62,14 +47,6 @@ methods (Static)
             stats.FillFactor = stats.Pmax / (stats.Voc * stats.Isc);
         end
 
-        % Whether the two assumptions above actually hold, decided from the
-        % measurement rather than the cell model: the OPEN path draws a
-        % current set by Voc while Isc scales with the light, so under weak
-        % illumination Voc is a floor and FF inherits the error; and the
-        % ladder stops at 10.3 kohm, so a cell whose knee needs more never
-        % leaves its current-source region and Pmax is a lower bound.
-        % Reporting either without saying so would look like an answer.
-
         if ~isempty(open) && stats.Isc > 0
             stats.OpenFraction = i(open) / stats.Isc;
             stats.VocIsFloor   = stats.OpenFraction > 0.05;
@@ -83,7 +60,6 @@ methods (Static)
     end
 
     function report(stats)
-    % The console gets what the figure carries, in the order a paper lists it.
 
         if stats.Points == 0
             fprintf("No state returned a reading, so there is no curve.\n");
@@ -92,8 +68,6 @@ methods (Static)
 
         guessed = "   (no SHORT state, largest measured)";
 
-        % Console and figure carry the same numbers in the same units, so an
-        % area given for one cannot leave the other reporting the other thing.
         if stats.AreaCm2 > 0
             scale = 1e3 / stats.AreaCm2;
             fprintf("\nJsc  %8.3f mA/cm2%s\n", scale * stats.Isc, ...
@@ -143,15 +117,6 @@ methods (Static)
     end
 
     function draw(results, stats, path)
-    % Laid out the way a cell measurement is published: first quadrant,
-    % voltage across, current left and power right, Pmax marked and the
-    % four numbers in a box. Current density only where CELL_AREA_CM2 gives
-    % an area; inventing one would be worse than labelling the axis
-    % honestly.
-    %
-    % Sorted by voltage before the line is drawn, because the sweep is
-    % ordered by the resistance model and that model is allowed to be wrong
-    % about the order.
 
         if stats.Points == 0
             return
@@ -171,12 +136,6 @@ methods (Static)
         v = abs(results.VoltageV);
         i = scale * abs(results.CurrentA);
         p = scale * abs(results.VoltageV .* results.CurrentA);
-
-        % The ladder gets the line; SHORT and OPEN get markers of their
-        % own. The board has no states between the top of the ladder and
-        % the 470 kohm OPEN path, so a line joining them would be the most
-        % confident-looking part of the figure and the only part with no
-        % data under it.
 
         ladder = results.Mode ~= "SHORT" & results.Mode ~= "OPEN";
         [vl, order] = sort(v(ladder));
@@ -234,11 +193,6 @@ methods (Static)
             first = sprintf("I_{sc} = %.3f mA", 1e3 * stats.Isc);
         end
 
-        % Placed in data coordinates rather than on the figure, so it lands in
-        % the same empty region whatever the cell turns out to do. That region
-        % is the left of the plot below the plateau: the I-V runs flat along
-        % the top until the knee, the P-V climbs from the origin and is still
-        % low there, and the legend sits under it in the corner.
         text(ax, 0.04 * stats.Voc, 0.74 * 1.1 * scale * stats.Isc, ...
             {first, ...
              sprintf(Util.ternary(stats.VocIsFloor, ...
@@ -254,10 +208,6 @@ methods (Static)
             fprintf("Plot:     %s\n", path);
         end
     end
-
-    %% =====================================================================
-    %  Sweep planning
-    %  =====================================================================
 
 end
 end
