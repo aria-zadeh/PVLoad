@@ -118,7 +118,7 @@ WIPER_CODES = [0 255];
 
 WRITE_CSV = true;
 OUT_DIR   = "../data/sweep_data";
-RUN_TAG   = "ILASER0p650";            % added to the file names. this is where the
+RUN_TAG   = "ILASER0p850";            % added to the file names. this is where the
                            % illumination goes, since nothing else records
                            % it. e.g. "cell3_lamp60"
 
