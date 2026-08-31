@@ -182,7 +182,7 @@ DMM_MAX_FAULTS   = 5;              % consecutive read failures before abort
 
 WRITE_CSV = true;
 OUT_DIR   = "../data/sweep_data";
-RUN_TAG   = "ILASER0p700";
+RUN_TAG   = "ILASER0p650";
 CSV_CHUNK = 64;            % states written to disk at a time. writetable
                            % reopens the file per call, so a row at a time
                            % is far too slow and the whole run at the end
