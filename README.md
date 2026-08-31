@@ -103,6 +103,8 @@ matlab/
   test_arduino.m   Pin-by-pin bench test of the Arduino alone
 data/
   sweep_data/      CSV output
+figures/
+  family_*.png     I-V and P-V across the laser drive levels, raw and fitted
 ```
 
 [`docs/HARDWARE.md`](docs/HARDWARE.md) is the hardware reference: node-by-node topology, Arduino pin
