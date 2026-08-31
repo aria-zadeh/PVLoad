@@ -73,9 +73,7 @@ function states = enumerateStates(cfg)
     states = makeState("", 0, 0, 0);
     states(:) = [];                       % empty struct array of the right shape
 
-    if cfg.IncludeShort
-        states(end+1) = makeState("SHORT", 0, 0, cfg.RContact);
-    end
+    states(end+1) = makeState("SHORT", 0, 0, cfg.RContact);
 
     % LOW: U2 bypassed by K3, so only U1 is in the path.
     for n1 = 0:cfg.CodeStep:cfg.WiperSteps
@@ -90,10 +88,8 @@ function states = enumerateStates(cfg)
         states(end+1) = makeState("FULL", n1, n2, r);  %#ok<AGROW>
     end
 
-    if cfg.IncludeOpen
-        r = cfg.ROpenPath + 2 * cfg.RWiper;
-        states(end+1) = makeState("OPEN", 0, 0, r);
-    end
+    r = cfg.ROpenPath + 2 * cfg.RWiper;
+    states(end+1) = makeState("OPEN", 0, 0, r);
 end
 
 function [n1, n2] = splitCode(total, maxCode)
@@ -129,7 +125,6 @@ function k = findState(plan, mode, code, cfg)
     if isempty(k)
         error("PVLoad:StateNotInPlan", ...
             "%s at code %d is not in the sweep. CODE_STEP is %g and " + ...
-            "INCLUDE_SHORT is %d; both have to leave that state in.", ...
-            mode, code, cfg.CodeStep, cfg.IncludeShort);
+            "has to leave that state in.", mode, code, cfg.CodeStep);
     end
 end

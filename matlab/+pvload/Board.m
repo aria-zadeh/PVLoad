@@ -48,8 +48,7 @@ function board = connectBoard(cfg)
     board.PinK1      = cfg.PinK1;
     board.PinK2      = cfg.PinK2;
     board.PinK3      = cfg.PinK3;
-    board.SettleTime = cfg.SettleTime;
-    board.Verify     = cfg.VerifyWiper;
+    board.SafeSettle = cfg.Timing.RelaySettle;
 
     configurePin(a, cfg.PinK1, "DigitalOutput");
     configurePin(a, cfg.PinK2, "DigitalOutput");
@@ -133,9 +132,8 @@ function verifyWiper(dev, expected, label)
     if actual ~= expected
         error("PVLoad:WiperMismatch", ...
             "%s did not take the wiper code: wrote %d, read back %d. " + ...
-            "Check the chip select wiring, the SDO line, and that SHDN# " + ...
-            "is held high. Set VERIFY_WIPER to false to sweep blind.", ...
-            label, expected, actual);
+            "Check the chip select wiring, the SDO line, and that " + ...
+            "SHDN# is held high.", label, expected, actual);
     end
 end
 
@@ -144,10 +142,8 @@ function setWipers(board, code1, code2)
     writeWiper(board.U1, code1);
     writeWiper(board.U2, code2);
 
-    if board.Verify
-        verifyWiper(board.U1, code1, "U1");
-        verifyWiper(board.U2, code2, "U2");
-    end
+    verifyWiper(board.U1, code1, "U1");
+    verifyWiper(board.U2, code2, "U2");
 end
 
 function selfTestPotentiometers(board)
@@ -189,7 +185,7 @@ function enterSafeState(board)
 % Also where the board lands on an Arduino reset, entered deliberately.
     setMode(board, "OPEN");
     setWipers(board, 0, 0);
-    pause(board.SettleTime);
+    pause(board.SafeSettle);
 end
 
 

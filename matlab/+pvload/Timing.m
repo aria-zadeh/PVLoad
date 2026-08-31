@@ -25,11 +25,6 @@ function settle = settleFor(state, prevMode, cfg)
 % The meter's integration window is deliberately absent: READ? blocks for
 % it after this pause, so counting it here would only slow the sweep.
 
-    if ~cfg.Dmm.Enabled
-        settle = cfg.SettleTime;
-        return
-    end
-
     T = cfg.Timing;
     if state.Mode == prevMode
         tSwitch = T.WiperSettle;

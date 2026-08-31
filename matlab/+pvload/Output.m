@@ -22,13 +22,8 @@ methods (Static)
         log.Readings = stampedBase(cfg, "") + ".csv";
 
         fprintf("Logging to %s\n", log.Readings);
-        if cfg.Adapt.Enabled
-            fprintf("  at most %d states, written in blocks of %d.\n", ...
-                min(cfg.Adapt.MaxPoints, nStates), cfg.Out.Chunk);
-        else
-            fprintf("  %d states, written in blocks of %d.\n", nStates, ...
-                cfg.Out.Chunk);
-        end
+        fprintf("  at most %d states, written in blocks of %d.\n", ...
+            min(cfg.Adapt.MaxPoints, nStates), cfg.Out.Chunk);
     end
 
     function append(log, results, rows, first)

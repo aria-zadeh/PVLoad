@@ -46,68 +46,10 @@ function results = runExperiment(board, meas, plan, cfg, log)
         fprintf("Self-test skipped. The potentiometers are unverified.\n");
     end
 
-    if cfg.Adapt.Enabled
-        results = runSweepAdaptive(board, meas, plan, cfg, log);
-    else
-        results = runSweep(board, meas, plan, cfg, log);
-    end
+    results = runSweepAdaptive(board, meas, plan, cfg, log);
 
     Board.safeState(board);
     clear guard;
-end
-
-function results = runSweep(board, meas, plan, cfg, log)
-% A failure on the very first point is misconfiguration rather than a
-% glitch, so it aborts instead of NaNing its way through 769 states.
-
-    total   = numel(plan);
-    results = allocateResults(total);
-    prev    = "";
-    run     = 0;               % consecutive faults
-    faults  = 0;
-    written = 0;               % states already on disk
-    started = tic;             % what the point actually costs, not the estimate
-
-    for k = 1:total
-        settle = Timing.settle(plan(k), prev, cfg);
-        Board.apply(board, plan(k), settle);
-        prev = plan(k).Mode;
-
-        [volts, amps, fault, meas] = Meter.readPoint(meas, cfg.Dmm.Parallel);
-
-        if fault
-            faults = faults + 1;
-            run    = run + 1;
-            if k == 1 || run > cfg.Dmm.MaxFaults
-                error("PVLoad:MeterUnresponsive", ...
-                    "The meters failed %d reading(s) in a row at state " + ...
-                    "%d of %d. Check the cabling and the addresses.", ...
-                    run, k, total);
-            end
-        else
-            run = 0;
-        end
-
-        results = recordPoint(results, k, plan(k), settle, volts, amps);
-
-        if cfg.PrintStatus
-            printState(k, total, plan(k), volts, amps);
-        end
-
-        % Flushed in blocks rather than at the end, so an abort keeps
-        % everything up to the last block boundary. Per row would be
-        % correct and far too slow: writetable reopens the file each call.
-        if k - written >= cfg.Out.Chunk || k == total
-            Output.append(log, results, (written + 1):k, written == 0);
-            written = k;
-        end
-    end
-
-    fprintf("\n%d read fault(s).\n", faults);
-    fprintf("%.0f ms per state in the end, against the %.0f ms " + ...
-        "estimated.\n", 1e3 * toc(started) / total, ...
-        1e3 * Timing.perPoint(cfg, plan));
-    Meter.reportRangeChanges(meas);
 end
 
 function results = runSweepAdaptive(board, meas, master, cfg, log)

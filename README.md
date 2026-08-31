@@ -117,6 +117,8 @@ matlab/
   test_arduino.m   Pin-by-pin bench test of the Arduino alone
 data/
   sweep_data/      CSV output
+figures/
+  family_*.png     I-V and P-V across the laser drive levels, raw and fitted
 ```
 
 [`docs/HARDWARE.md`](docs/HARDWARE.md) is the hardware reference: node-by-node topology, Arduino pin
@@ -200,7 +202,6 @@ independently.
 | `"board"` | Arduino | Safe state, potentiometer self-test, walk a spread of load states |
 | `"ramp"` | Arduino | Climb the resistance range slowly enough to follow on a handheld meter |
 | `"wiper"` | Arduino | Park at the state pairs whose difference is one wiper resistance |
-| `"k3"` | Arduino | Four holds that say whether K3 closes |
 | `"verify"` | Arduino | Seven holds that exercise every part of a freshly built board |
 | `"ohms"` | Arduino, one meter | Measure every state in the sweep on ohms, write a CSV and save a plot |
 | `"meters"` | both sweep meters | Identify, configure, take ten readings |

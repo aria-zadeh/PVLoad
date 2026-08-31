@@ -21,7 +21,6 @@ clc;
 %             follow on a handheld meter across J1 and J3
 %   "wiper"   board only, the pairs of states whose difference is one
 %             wiper resistance and nothing else
-%   "k3"      board only, four holds that say whether K3 closes
 %   "verify"  board only, seven holds that between them exercise every
 %             part of the board. the check for a freshly built one.
 %   "ohms"    board and one meter on ohms across J1 and J3. every
@@ -78,22 +77,16 @@ CELL_AREA_CM2 = 0;         % cm2 of illuminated cell, or 0 if not known.
 % A sweep costs about six minutes; RUN "plan" prints the estimate before
 % anything is opened.
 
-SETTLE_TIME  = 0.20;       % s per state with no meters. ignored once
-                           % DMM_ENABLED, which computes the hold instead.
 POINT_BUDGET = 1.0;        % s, the most one state may cost end to end. the
                            % hold is whatever is left after the conversion
                            % and the board, so this is the number the run is
                            % built to. it never truncates a conversion.
-CODE_STEP    = 16;         % 1 visits all 769 states, 16 visits 50; the
-                           % count is 767/step + 2. thins by wiper code and
-                           % never by resistance. ignored when
-                           % ADAPTIVE_SWEEP is on.
+CODE_STEP    = 16;         % thins the board-only modes by wiper code.
+                           % count is 767/step + 2. the sweep ignores it and
+                           % works against all 769.
 PRINT_STATUS = true;       % echo each state. off for long unattended runs.
 SELF_TEST    = true;       % probe both pots over SPI first. false to test
                            % the flow on a bare Arduino with no board.
-VERIFY_WIPER = true;       % read each wiper register back after writing
-INCLUDE_SHORT = true;      % the Isc endpoint (K2 closed)
-INCLUDE_OPEN  = true;      % the Voc endpoint (470 kohm in circuit)
 MEASURE_SETTLE = true;     % watch the cell settle at the slowest state
                            % before the run and take its capacitance from
                            % that, rather than guessing C_LOAD for a
@@ -130,7 +123,6 @@ WIPER_CODES = [0 255];     % code sums RUN "wiper" compares at. past 255
 % SHORT and OPEN are always in the coarse pass, so Isc and Voc do not depend
 % on any of this.
 
-ADAPTIVE_SWEEP    = true;
 ADAPT_COARSE_STEP = 32;    % wiper codes between coarse states, the same
                            % thinning CODE_STEP does. 32 makes the first
                            % pass 27 states.
@@ -182,7 +174,7 @@ DMM_MAX_FAULTS   = 5;              % consecutive read failures before abort
 
 WRITE_CSV = true;
 OUT_DIR   = "../data/sweep_data";
-RUN_TAG   = "ILASER0p650";
+RUN_TAG   = "ILASER0p850";
 CSV_CHUNK = 64;            % states written to disk at a time. writetable
                            % reopens the file per call, so a row at a time
                            % is far too slow and the whole run at the end
@@ -212,12 +204,8 @@ cfg = struct( ...
     'PinK1',         pins.K1, ...
     'PinK2',         pins.K2, ...
     'PinK3',         pins.K3, ...
-    'SettleTime',    SETTLE_TIME, ...
     'CodeStep',      CODE_STEP, ...
     'PrintStatus',   PRINT_STATUS, ...
-    'IncludeShort',  INCLUDE_SHORT, ...
-    'IncludeOpen',   INCLUDE_OPEN, ...
-    'VerifyWiper',   VERIFY_WIPER, ...
     'SelfTest',      SELF_TEST, ...
     'RampSteps',     RAMP_STEPS, ...
     'RampDwell',     RAMP_DWELL, ...
@@ -235,7 +223,6 @@ cfg.Cell = struct( ...
     'AreaCm2', CELL_AREA_CM2);
 
 cfg.Adapt = struct( ...
-    'Enabled',    ADAPTIVE_SWEEP, ...
     'CoarseStep', ADAPT_COARSE_STEP, ...
     'Gap',        ADAPT_GAP, ...
     'Bend',       ADAPT_BEND, ...
@@ -289,7 +276,6 @@ switch cfg.Run
     case "board",  pvload.Modes.runBoard(cfg);
     case "ramp",   pvload.Modes.runRamp(cfg);
     case "wiper",  pvload.Modes.runWiper(cfg);
-    case "k3",     pvload.Modes.runK3(cfg);
     case "verify", pvload.Modes.runVerify(cfg);
     case "ohms",   pvload.Modes.runOhms(cfg);
     case "meters", pvload.Modes.runMeters(cfg);

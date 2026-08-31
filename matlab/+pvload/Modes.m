@@ -15,11 +15,7 @@ methods (Static)
 
     function runPlan(cfg)
 
-        if cfg.Adapt.Enabled
-            plan = Plan.master(cfg);
-        else
-            plan = Plan.build(cfg);
-        end
+        plan = Plan.master(cfg);
         reportPlan(cfg, plan);
         fprintf("\nNothing was opened. Set RUN to board, meters or sweep to " + ...
             "use hardware.\n");
@@ -165,41 +161,6 @@ methods (Static)
         fprintf("U2 wiper is each FULL row minus the LOW row above it, and " + ...
                 "should be\nthe same number every time.\n");
         fprintf("Returned to OPEN.\n");
-    end
-
-    function runK3(cfg)
-    % Four holds and one question: does K3 close.
-    %
-    % K3 shorts out U2 in LOW, so U2's code cannot reach the terminals and
-    % all four holds must read alike. If they do not, U2 has been in the
-    % path the whole time -- a failure invisible everywhere else, because it
-    % only makes LOW and FULL read the same.
-    %
-    % The codes are written straight to the pots instead of coming from the
-    % plan, because no planned state drives U2 while K3 is closed.
-
-        board = Board.connect(cfg);
-        guard = onCleanup(@() pvload.Util.quietly(@() pvload.Board.safeState(board)));
-
-        Board.safeState(board);
-
-        fprintf("\nFour holds, %g s each. Write down all four.\n", cfg.RampDwell);
-        fprintf("All four alike means K3 closes. A jump of about 5000 ohm\n");
-        fprintf("between them means it does not.\n\n");
-
-        Board.mode(board, "LOW");
-        labels = ["A" "B" "C" "D"];
-        codes  = [0 255 0 255];
-        for k = 1:4
-            fprintf("  %s   U2 code %3d\n", labels(k), codes(k));
-            drawnow;
-            Board.wipers(board, 0, codes(k));
-            pause(cfg.RampDwell);
-        end
-
-        Board.safeState(board);
-        clear guard;
-        fprintf("\nDone. Returned to OPEN.\n");
     end
 
     function runVerify(cfg)
@@ -364,14 +325,9 @@ methods (Static)
     % curves is several runs of this rather than one run of several levels.
     % RUN_TAG is the only record of which was which.
 
-        % The adaptive sweep refines into the gaps of its coarse pass, so it
-        % works against the full plan whatever CODE_STEP says. The fixed sweep
-        % keeps its thinned one.
-        if cfg.Adapt.Enabled
-            plan = Plan.master(cfg);
-        else
-            plan = Plan.build(cfg);
-        end
+        % Refinement fills the gaps of the coarse pass, so this works
+        % against the full plan whatever CODE_STEP says.
+        plan = Plan.master(cfg);
         reportPlan(cfg, plan);
 
         board = Board.connect(cfg);
@@ -438,20 +394,13 @@ function reportPlan(cfg, plan)
 % Everything needed to decide whether to let it run, before anything opens.
 
     perPoint = Timing.perPoint(cfg, plan);
-    total    = perPoint * numel(plan);
+    nCoarse  = numel(Plan.coarse(plan, cfg));
+    cap      = min(cfg.Adapt.MaxPoints, numel(plan));
 
-    if cfg.Adapt.Enabled
-        nCoarse = numel(Plan.coarse(plan, cfg));
-        cap     = min(cfg.Adapt.MaxPoints, numel(plan));
-        fprintf("Adaptive sweep: %d coarse states of %d possible, " + ...
-            "%g ohm to %g ohm.\n", nCoarse, numel(plan), ...
-            plan(1).Resistance, plan(end).Resistance);
-        fprintf("Refinement then adds states where the measured curve " + ...
-            "bends, to at most %d.\n", cap);
-    else
-        fprintf("Sweep plan: %d load states, %g ohm to %g ohm.\n", ...
-            numel(plan), plan(1).Resistance, plan(end).Resistance);
-    end
+    fprintf("Sweep: %d coarse states of %d possible, %g ohm to %g ohm.\n", ...
+        nCoarse, numel(plan), plan(1).Resistance, plan(end).Resistance);
+    fprintf("Refinement then adds states where the measured curve " + ...
+        "bends, to at most %d.\n", cap);
 
     % Whether the cell is described here or found at the start of the run.
     % The OPEN state check that used to live here has moved to probeRanges,
@@ -474,13 +423,8 @@ function reportPlan(cfg, plan)
         fprintf("Meters: none. Voltage and current will be logged as NaN.\n");
     end
 
-    if cfg.Adapt.Enabled
-        fprintf("About %.0f ms per point. Estimated run time %.1f to " + ...
-            "%.1f minutes, set by how much\nof the curve turns out to " + ...
-            "bend.\n", 1e3 * perPoint, perPoint * nCoarse / 60, ...
-            perPoint * cap / 60);
-    else
-        fprintf("About %.0f ms per point. Estimated run time %.1f " + ...
-            "minutes.\n", 1e3 * perPoint, total / 60);
-    end
+    fprintf("About %.0f ms per point. Estimated run time %.1f to " + ...
+        "%.1f minutes, set by how much\nof the curve turns out to " + ...
+        "bend.\n", 1e3 * perPoint, perPoint * nCoarse / 60, ...
+        perPoint * cap / 60);
 end
